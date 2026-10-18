@@ -615,7 +615,7 @@ def main():
             e.wait_for_function('() => window.__fakeAuth && window.__daisy', timeout=10000)
             e.evaluate(f"window.__fakeAuth.signInAs['pyxorium.com'] = {json.dumps(DIDS['colorado.atprotocol.space'])}")
             check('signed out, the start screen asks to sign in first: Open a table waits, and the lounge says "Sign in above to mingle"',
-                  e.is_visible('.dz-lobby') and e.is_disabled('.dz-open') and 'Sign in above to mingle' in e.inner_text('.dz-lounge-note') and e.is_disabled('.dz-switch'))
+                  e.is_visible('.dz-lobby') and e.is_disabled('.dz-open') and 'Sign in above to mingle. Joining the lounge requires one additional authorization.' in e.inner_text('.dz-lounge-note') and e.is_disabled('.dz-switch'))
             check('…and says what signing in asks for ("Play Daisy")', 'Play Daisy' in e.inner_text('.dz-lobby-hint'))
             e.fill('.dz-handle', 'pyxorium.com')
             e.click('.dz-signin')
@@ -840,15 +840,15 @@ def main():
                     la.goto(lurl)
                     la.locator('.dz-lounge').wait_for(timeout=5000)
                     sign_in(la, 'pyxorium.com')
-                    check('signed in, the lounge panel sits under "Open a table", mingling off, saying the first time asks one more approval',
+                    check('signed in, the lounge panel sits under "Open a table", mingling off, saying "Joining the lounge requires one additional authorization"',
                           la.is_visible('.dz-lounge') and la.get_attribute('.dz-switch', 'aria-checked') == 'false' and 'Off.' in la.inner_text('.dz-lounge-note')
-                          and 'one more approval' in la.inner_text('.dz-lounge-note'))
+                          and 'Joining the lounge requires one additional authorization.' in la.inner_text('.dz-lounge-note'))
                     la.click('.dz-switch')
                     la.locator('.dz-ldialog:not([hidden])').wait_for(timeout=5000)
                     text = la.inner_text('.dz-ldialog')
-                    check('turning it on shows our explanation first, "one more approval … only this first time" (before any window)',
+                    check('turning it on shows our explanation first, "one additional authorization … only this first time" (before any window)',
                           'Turn on mingling?' in text and 'it only says that you\'ve chosen to mingle, not whether you\'re here or signed in' in text
-                          and 'one more approval' in text and la.evaluate('window.__fakeAuth.signIns.length') == 1
+                          and 'one additional authorization' in text and 'only this first time' in text and la.evaluate('window.__fakeAuth.signIns.length') == 1
                           and la.evaluate('window.__fakeAuth.scopesAsked') == ['atproto include:cafe.thunderbird.daisy.authPlay'])
                     la.click('.dz-ldialog-no')
                     check('…"Not now" closes it and leaves mingling off', la.is_hidden('.dz-ldialog') and la.get_attribute('.dz-switch', 'aria-checked') == 'false')
@@ -858,6 +858,7 @@ def main():
                           asked == ['atproto include:cafe.thunderbird.daisy.authPlay include:cafe.thunderbird.daisy.authLounge?aud=did:web:relay.daisy.thunderbird.cafe%23daisy_relay']
                           and PA in LOUNGE and la.get_attribute('.dz-switch', 'aria-checked') == 'true', f'{asked} {LOUNGE}')
                     check('…the relay accepted its pass: "Mingling … (as @pyxorium.com)"', 'as @pyxorium.com' in la.inner_text('.dz-lounge-note'))
+                    check('no match in progress yet: no "You have a match in progress" line', la.is_hidden('.dz-going'))
                     got = who(la)
                     check('alone: "Nobody else is mingling here right now"', got == [] and 'Nobody else' in la.inner_text('.dz-who-note'), str(got))
                     mingle(lb, 'thunderbirdwine.bsky.social')
@@ -891,6 +892,8 @@ def main():
                     lc.click('.dz-switch')
                     lc.wait_for_function("() => document.getElementById('daisy').dataset.lounge === 'off'", timeout=8000)
                     check('turning mingling off deletes the lounge record', PC not in LOUNGE and lc.get_attribute('.dz-switch', 'aria-checked') == 'false', str(LOUNGE))
+                    check('…and, already approved, the off text drops "requires one additional authorization"',
+                          'Off.' in lc.inner_text('.dz-lounge-note') and 'additional authorization' not in lc.inner_text('.dz-lounge-note'), lc.inner_text('.dz-lounge-note'))
                     # Invite again and Play: both pages go to one new table, inviter at seat 1.
                     la.wait_for_function("() => /Invite/.test(document.querySelector('.dz-person').textContent)", timeout=10000)
                     who(la)
@@ -920,6 +923,19 @@ def main():
                     la.wait_for_function("() => document.getElementById('daisy') && document.getElementById('daisy').dataset.lounge === 'here'", timeout=15000)
                     check('…Leave: the start screen (no table in the address, the relay and timers kept) and back in the lounge by itself',
                           'table=' not in la.url and 'relay=' in la.url and la.is_visible('.dz-lounge'), la.url)
+                    going = la.inner_text('.dz-going') if la.is_visible('.dz-going') else ''
+                    check('…the start screen says "You have a match in progress with @thunderbirdwine.bsky.social. Back to the table"',
+                          'You have a match in progress with @thunderbirdwine.bsky.social.' in going and 'Back to the table' in going, going)
+                    href = la.get_attribute('.dz-going a', 'href') or ''
+                    q = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+                    check('…its link is that table, with the relay and timers kept', q.get('table') == ta and 'relay' in q, href)
+                    la.click('.dz-going a')
+                    la.wait_for_function("() => window.__daisy.me && window.__daisy.me.seat === 1 && window.__daisy.phase === 'playing'", timeout=15000)
+                    check('…Back to the table: at seat 1 again, the match going on', agree(la, lb))
+                    lb.click('.dz-home'); lb.click('.dz-leave-yes')
+                    lb.wait_for_function("() => document.getElementById('daisy').dataset.lounge === 'here'", timeout=15000)
+                    check('…thunderbirdwine\'s start screen has the line too, with @pyxorium.com',
+                          'You have a match in progress with @pyxorium.com.' in lb.inner_text('.dz-going'))
                     ca.close(); cb.close(); cc.close()
                 finally:
                     lounge_relay.terminate()
