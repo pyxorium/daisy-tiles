@@ -102,8 +102,11 @@ test('a file the server already holds under another type: the Foundry\'s retry',
   assert.equal(rec.cid, await dagCborCid(rec.tile));
 });
 
-test('step 6: from the real published.json (step 4: tiles and the match lexicon), only the lounge record and the two permission sets are due', async () => {
-  const real = JSON.parse(readFileSync(new URL('../published.json', import.meta.url), 'utf8'));
+test('step 6: from the real published.json as step 4 left it (tiles and the match lexicon), only the lounge record and the two permission sets are due', async () => {
+  const now = JSON.parse(readFileSync(new URL('../published.json', import.meta.url), 'utf8'));
+  // Once step 6's lexicons are published, published.json lists them too: this test starts from before that.
+  const { lexicons: _done, ...real } = now;
+  if (_done) assert.deepEqual(Object.keys(publishedLexicons(now)).sort(), [...LEXICON_IDS].sort(), 'published.json lists all four lexicons');
   const pds = createFakePds({ did: ACCOUNT, handle: 'thunderbird.cafe' });
   const r = await run(pds, { published: real, dryRun: true });
   assert.equal(r.plan.length, 0, 'the tiles are not published again');

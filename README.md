@@ -6,7 +6,7 @@ Both players' pages run the same pinned **house** tile, and the dice are **commi
 player can choose them and anyone can re-check a saved match. Design and status are in
 `claude/daisy-plan.md` (project doc). This folder is modelled on `C:\thunderbird-cafe\sevenup-tiles`.
 
-**Status: build step 5 of 7 (Oct 18 2026): the real relay on Fly.io.** Steps 1 (rules and dice), 2 (two
+**Status: build step 6 of 7 (Oct 18 2026): the lounge (step 5, the real relay on Fly.io, is done).** Steps 1 (rules and dice), 2 (two
 pages through a stand-in relay), 3 (the 3D die) and 4 (signing in to sit, saving, publishing and pinning)
 are done. You sign in with your atproto account to sit (handle suggestions as you type; the permission
 asked is only to save Daisy matches), save a finished match to your own repo when you ask (the page's own
@@ -55,7 +55,7 @@ fallback without WebGL, a sheet of the six glazes); step 4: signing in to sit (a
 sign-in library), the handle suggestions, saving (the prompt, the record, Not now, signed out then Sign in
 and save), a sign-in for the wrong account, the house version check, and the published tiles pinned
 (published with the real `publish.mjs` to a stand-in PDS, played under the page's security policy, the
-record naming the house, a changed record refused, each tile on its own showing its card picture and never on the page). 75 checks. (The main checks use the memory tiles: the site's own pins point at the real published tiles, which only the real PDS serves.) Chromium needs
+record naming the house, a changed record refused, each tile on its own showing its card picture and never on the page); step 6, the lounge, against the real relay's server with stand-in lookups (`C:\thunderbird-cafe\daisy-relay\test\lounge-standin.mjs`, needs daisy-relay beside this folder with its packages installed): the explanation before signing in, the "Daisy lounge" sign-in and the lounge record, who else is mingling, blocks both ways, an invitation with Not now and "No answer", a reload while mingling, mingling off deleting the record, and Play sending both pages to one table. 96 checks. (The main checks use the memory tiles: the site's own pins point at the real published tiles, which only the real PDS serves.) Chromium needs
 `--use-angle=swiftshader --enable-unsafe-swiftshader` for WebGL without a GPU (the script passes them).
 
 ## Folders

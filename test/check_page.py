@@ -1,4 +1,4 @@
-"""Browser checks for the site's Daisy page (build steps 2 to 5): two separate pages, as on two
+"""Browser checks for the site's Daisy page (build steps 2 to 6): two separate pages, as on two
 computers, playing through the stand-in relay; signing in to sit (with a stand-in for the sign-in
 library: real sign-ins can only be tested by the owner), saving, the house version check, and the
 published tiles, pinned (published to a stand-in PDS with the real scripts/publish.mjs).
@@ -53,11 +53,23 @@ class KeptSet extends Set {
 }
 window.__fakeAuth = { valid: new KeptSet(), signInAs: {}, expired: new Set(), failNext: false, saved: [], signIns: [] };
 const F = () => window.__fakeAuth;
+// The permission each account's sign-in was given (step 6): the sets expand as a real server does it.
+const SCOPES = JSON.parse(localStorage.getItem('fake-scopes') || '{}');
+const expand = (scope) => ['repo:cafe.thunderbird.daisy.match', ...(/authLounge/.test(scope || '') ? ['repo:cafe.thunderbird.daisy.lounge', 'rpc:cafe.thunderbird.daisy.lounge.enter?aud=did:web:relay.daisy.thunderbird.cafe%%23daisy_relay'] : []), 'atproto'].join(' ');
 function session(did) {
   return {
     did, sub: did,
-    async fetchHandler(path, init) {
+    async getTokenInfo() { return { sub: did, scope: expand(SCOPES[did]) }; },
+    async fetchHandler(path, init = {}) {
       if (F().expired.has(did)) return new Response(JSON.stringify({ error: 'InvalidToken', message: 'expired' }), { status: 401 });
+      if (path.startsWith('/xrpc/com.atproto.server.getServiceAuth')) {
+        if (!/authLounge/.test(SCOPES[did] || '')) return new Response(JSON.stringify({ error: 'ScopeMissingError' }), { status: 403 });
+        return new Response(JSON.stringify({ token: `pass:${did}` }), { status: 200 });
+      }
+      if (init.body && /cafe\.thunderbird\.daisy\.lounge/.test(init.body)) {          // lounge records live at the stand-in PDS
+        F().lounge = (F().lounge || 0) + 1;
+        return fetch(`https://pds.test${path}`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: init.body });
+      }
       if (F().failNext) { F().failNext = false; return new Response(JSON.stringify({ error: 'InternalServerError' }), { status: 500 }); }
       const body = JSON.parse(init.body);
       F().saved.push({ did, path, ...body });
@@ -70,13 +82,14 @@ class BrowserOAuthClient {
   static async load(opts) { window.__fakeAuth.clientId = opts.clientId; return new BrowserOAuthClient(); }
   async init() {}
   addEventListener() {}
-  async signInPopup(handle, { signal, popupName } = {}) {
+  async signInPopup(handle, { signal, popupName, scope } = {}) {
     await new Promise((r) => setTimeout(r, 300));
     if (signal && signal.aborted) throw new Error('Aborted');
     try { const w = window.open('', popupName); if (w) w.close(); } catch {}
     const did = F().signInAs[handle] || HANDLES[handle];
     delete F().signInAs[handle];
-    F().valid.add(did); F().expired.delete(did); F().signIns.push(handle);
+    SCOPES[did] = scope || ''; localStorage.setItem('fake-scopes', JSON.stringify(SCOPES));
+    F().valid.add(did); F().expired.delete(did); F().signIns.push(handle); (F().scopesAsked ||= []).push(scope || '');
     return session(did);
   }
   async restore(did) { if (!F().valid.has(did)) throw new Error('no session'); return session(did); }
@@ -131,10 +144,25 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
 
 def lookups(route):
     q = urllib.parse.parse_qs(urllib.parse.urlparse(route.request.url).query)
+    if 'app.bsky.actor.getProfiles' in route.request.url:          # step 6: names for the lounge
+        by_did = {d: h for h, d in DIDS.items()}
+        profiles = [{'did': d, 'handle': by_did[d], 'displayName': by_did[d].split('.')[0].title()} for d in q.get('actors', []) if d in by_did]
+        return route.fulfill(status=200, content_type='application/json', body=json.dumps({'profiles': profiles}))
     did = DIDS.get((q.get('handle') or [''])[0])
     if did:
         return route.fulfill(status=200, content_type='application/json', body=json.dumps({'did': did}))
     return route.fulfill(status=400, content_type='application/json', body='{"error":"InvalidRequest"}')
+
+
+LOUNGE = set()            # accounts with a lounge record at the stand-in PDS (step 6)
+RELAY_DIR = os.path.join(os.path.dirname(ROOT), 'daisy-relay')
+LOUNGE_PORT = 8788
+
+
+def start_lounge_relay(blocks=''):
+    """The real relay (C:\\thunderbird-cafe\\daisy-relay, server.js and lounge.js) with stand-in lookups, for the lounge."""
+    env = {**os.environ, 'DAISY_BLOCKS': blocks, 'DAISY_LOUNGE_FAST': '1'}
+    return subprocess.Popen(['node', os.path.join(RELAY_DIR, 'test', 'lounge-standin.mjs'), str(LOUNGE_PORT)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
 
 
 def start_relay():
@@ -161,6 +189,21 @@ def network(route):
     if url.startswith('https://plc.directory/'):
         return route.fulfill(status=200, content_type='application/json', body=json.dumps(
             {'alsoKnownAs': ['at://thunderbird.cafe'], 'service': [{'id': '#atproto_pds', 'type': 'AtprotoPersonalDataServer', 'serviceEndpoint': 'https://pds.test'}]}))
+    if url.startswith('https://pds.test/') and 'cafe.thunderbird.daisy.lounge' in url + (route.request.post_data or ''):
+        # Step 6: lounge records (cafe.thunderbird.daisy.lounge/self), kept here.
+        if 'getRecord' in url:
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(route.request.url).query)
+            has = q['repo'][0] in LOUNGE
+            return route.fulfill(status=200 if has else 400, content_type='application/json',
+                                 body=json.dumps({'uri': 'at://x/cafe.thunderbird.daisy.lounge/self', 'value': {}} if has else {'error': 'RecordNotFound'}),
+                                 headers={'access-control-allow-origin': '*'})
+        body = json.loads(route.request.post_data or '{}')
+        if 'putRecord' in url:
+            LOUNGE.add(body['repo'])
+        elif 'deleteRecord' in url:
+            LOUNGE.discard(body['repo'])
+        return route.fulfill(status=200, content_type='application/json', body=json.dumps({'uri': f"at://{body.get('repo')}/cafe.thunderbird.daisy.lounge/self"}),
+                             headers={'access-control-allow-origin': '*'})
     if fx and url.startswith('https://pds.test/'):
         q = urllib.parse.parse_qs(urllib.parse.urlparse(route.request.url).query)
         if 'getRecord' in url:
@@ -249,7 +292,7 @@ def main():
                 ctx.route('https://pds.test/**', network)
                 ctx.route('https://typeahead.waow.tech/**', suggestions)
                 page = ctx.new_page()
-                page.on('console', lambda m: errors.append(m.text) if m.type == 'error' else None)
+                page.on('console', lambda m: errors.append(f"{m.text} {(m.location or {}).get('url', '')}") if m.type == 'error' else None)
                 page.on('pageerror', lambda e: errors.append(str(e)))
                 return ctx, page
 
@@ -337,8 +380,10 @@ def main():
             link = open_table(a, 'pyxorium.com')
             check('opening a table gives a link to send', 'table=' in link and 'loader=' in link, link)
             cid = a.evaluate('window.__fakeAuth.clientId')
-            check('signing in on this computer is the loopback kind, asking only to save Daisy matches',
-                  cid.startswith('http://localhost?redirect_uri=http%3A%2F%2F127.0.0.1') and 'scope=atproto%20repo%3Acafe.thunderbird.daisy.match' in cid, cid)
+            check('signing in on this computer is the loopback kind, with Daisy\'s two permission sets (step 6)',
+                  cid.startswith('http://localhost?redirect_uri=http%3A%2F%2F127.0.0.1') and 'scope=atproto%20include%3Acafe.thunderbird.daisy.authPlay%20include%3Acafe.thunderbird.daisy.authLounge%3Faud%3Ddid%3Aweb%3Arelay.daisy.thunderbird.cafe%2523daisy_relay' in cid, cid)
+            asked = a.evaluate('window.__fakeAuth.scopesAsked')
+            check('…and sitting asks only for "Play Daisy" (authPlay)', asked == ['atproto include:cafe.thunderbird.daisy.authPlay'], str(asked))
             check('you sign in before you sit (one small window), and the page says who you are',
                   a.evaluate('window.__fakeAuth.signIns') == ['pyxorium.com'] and 'Signed in as @pyxorium.com' in a.inner_text('.dz-account'))
             check('the opener waits for the other player', 'Waiting for the other player' in a.inner_text('.dz-status'))
@@ -745,6 +790,105 @@ def main():
             shot(b, 's05-flat-b'); shot(a, 's05-glow-a')
             ca.close(); cb.close()
 
+            # ---------------- step 6: the lounge ----------------
+            if os.path.exists(os.path.join(RELAY_DIR, 'test', 'lounge-standin.mjs')):
+                print('The lounge (step 6):', flush=True)
+                PA, PB, PC = DIDS['pyxorium.com'], DIDS['thunderbirdwine.bsky.social'], DIDS['colorado.atprotocol.space']
+                lounge_relay = start_lounge_relay(blocks=f'{PA}>{PC}')                   # pyxorium.com blocks colorado
+                time.sleep(1.2)
+                lurl = base + f'&relay=ws://127.0.0.1:{LOUNGE_PORT}/&timers=short'
+                try:
+                    def mingle(page, handle):
+                        page.goto(lurl)
+                        page.fill('.dz-handle', handle)
+                        page.click('.dz-switch')
+                        page.locator('.dz-ldialog:not([hidden])').wait_for(timeout=5000)
+                        page.click('.dz-ldialog-yes')
+                        page.wait_for_function("() => document.getElementById('daisy').dataset.lounge === 'here'", timeout=10000)
+
+                    def who(page):
+                        page.click('.dz-who-ask')
+                        page.wait_for_function("() => !/Looking/.test(document.querySelector('.dz-who-note').textContent)", timeout=5000)
+                        page.wait_for_timeout(300)
+                        return page.evaluate("[...document.querySelectorAll('.dz-person .dz-person-handle')].map(e => e.textContent)")
+
+                    ca, la = computer(); cb, lb = computer(); cc, lc = computer()
+                    la.goto(lurl)
+                    la.locator('.dz-lounge').wait_for(timeout=5000)
+                    check('the lounge panel sits under "Open a table", mingling off',
+                          la.is_visible('.dz-lounge') and la.get_attribute('.dz-switch', 'aria-checked') == 'false' and 'Off.' in la.inner_text('.dz-lounge-note'))
+                    la.fill('.dz-handle', 'pyxorium.com')
+                    la.click('.dz-switch')
+                    la.locator('.dz-ldialog:not([hidden])').wait_for(timeout=5000)
+                    text = la.inner_text('.dz-ldialog')
+                    check('turning it on shows our explanation first (before any sign-in window)',
+                          'Turn on mingling?' in text and 'it only says that you\'ve chosen to mingle, not whether you\'re here or signed in' in text
+                          and la.evaluate('window.__fakeAuth.signIns.length') == 0)
+                    la.click('.dz-ldialog-no')
+                    check('…"Not now" closes it and leaves mingling off', la.is_hidden('.dz-ldialog') and la.get_attribute('.dz-switch', 'aria-checked') == 'false')
+                    mingle(la, 'pyxorium.com')
+                    asked = la.evaluate('window.__fakeAuth.scopesAsked')
+                    check('Continue: one sign-in asking for "Daisy lounge" (with "Play Daisy"), the lounge record written, in the lounge',
+                          asked == ['atproto include:cafe.thunderbird.daisy.authPlay include:cafe.thunderbird.daisy.authLounge?aud=did:web:relay.daisy.thunderbird.cafe%23daisy_relay']
+                          and PA in LOUNGE and la.get_attribute('.dz-switch', 'aria-checked') == 'true', f'{asked} {LOUNGE}')
+                    check('…the relay accepted its pass: "Mingling … (as @pyxorium.com)"', 'as @pyxorium.com' in la.inner_text('.dz-lounge-note'))
+                    got = who(la)
+                    check('alone: "Nobody else is mingling here right now"', got == [] and 'Nobody else' in la.inner_text('.dz-who-note'), str(got))
+                    mingle(lb, 'thunderbirdwine.bsky.social')
+                    mingle(lc, 'colorado.atprotocol.space')
+                    la.wait_for_timeout(400)
+                    got_a, got_c, got_b = who(la), who(lc), who(lb)
+                    check('who else: pyxorium.com sees thunderbirdwine only (colorado is blocked)', got_a == ['@thunderbirdwine.bsky.social'], str(got_a))
+                    check('…and the block works both ways: colorado sees thunderbirdwine only', got_c == ['@thunderbirdwine.bsky.social'], str(got_c))
+                    check('…thunderbirdwine sees both (blocks are only between the two)', sorted(got_b) == ['@colorado.atprotocol.space', '@pyxorium.com'], str(got_b))
+                    check('…with the time of the snapshot', 'press again to refresh' in la.inner_text('.dz-who-time'))
+                    # An invitation, Not now, and "No answer" (4 s with short timers).
+                    la.click('.dz-person:has-text("thunderbirdwine") button')
+                    check('Invite → "Invite sent"', 'Invite sent' in la.inner_text('.dz-person:has-text("thunderbirdwine")'))
+                    lb.locator('.dz-knock:not([hidden])').wait_for(timeout=5000)
+                    check('the invitation card: "@pyxorium.com invites you to a game of Daisy."', lb.inner_text('#dz-knock-text') == '@pyxorium.com invites you to a game of Daisy.', lb.inner_text('#dz-knock-text'))
+                    lb.click('.dz-knock-no')
+                    check('Not now closes the card', lb.is_hidden('.dz-knock'))
+                    la.wait_for_function("() => /No answer/.test(document.querySelector('.dz-person').textContent)", timeout=8000)
+                    check('…and the inviter only ever sees "No answer"', True)
+                    # A blocked invitation goes nowhere; the inviter can't tell.
+                    lc.click('.dz-person:has-text("thunderbirdwine") button')
+                    lb.locator('.dz-knock:not([hidden])').wait_for(timeout=5000)
+                    lb.click('.dz-knock-no')
+                    lc_list = lc.evaluate("[...document.querySelectorAll('.dz-person-handle')].map(e => e.textContent)")
+                    check('colorado can\'t even list pyxorium.com to invite (blocked)', '@pyxorium.com' not in lc_list, str(lc_list))
+                    # Reload while mingling: back in the lounge by itself.
+                    lc.reload()
+                    lc.wait_for_function("() => document.getElementById('daisy').dataset.lounge === 'here'", timeout=10000)
+                    check('a reload while mingling joins the lounge again by itself (no window)', lc.evaluate('window.__fakeAuth.signIns.length') == 0)
+                    # Mingling off: the record is deleted.
+                    lc.click('.dz-switch')
+                    lc.wait_for_function("() => document.getElementById('daisy').dataset.lounge === 'off'", timeout=8000)
+                    check('turning mingling off deletes the lounge record', PC not in LOUNGE and lc.get_attribute('.dz-switch', 'aria-checked') == 'false', str(LOUNGE))
+                    # Invite again and Play: both pages go to one new table, inviter at seat 1.
+                    la.wait_for_function("() => /Invite/.test(document.querySelector('.dz-person').textContent)", timeout=10000)
+                    who(la)
+                    la.click('.dz-person:has-text("thunderbirdwine") button')
+                    lb.locator('.dz-knock:not([hidden])').wait_for(timeout=5000)
+                    lb.click('.dz-knock-play')
+                    la.wait_for_function("() => window.__daisy.me && window.__daisy.me.seat === 1", timeout=10000)
+                    lb.wait_for_function("() => window.__daisy.me && window.__daisy.me.seat === 2", timeout=10000)
+                    ta = urllib.parse.parse_qs(urllib.parse.urlparse(la.url).query).get('table')
+                    tb = urllib.parse.parse_qs(urllib.parse.urlparse(lb.url).query).get('table')
+                    check('Play: both pages go to the same new table, the inviter at seat 1, the other at seat 2', ta and ta == tb, f'{ta} {tb}')
+                    check('…the lounge panel and the link to send are gone; "Waiting…" is not asking for a link',
+                          la.is_hidden('.dz-lounge') and la.is_hidden('.dz-invite') and lb.is_hidden('.dz-lounge'))
+                    ready(la); ready(lb)
+                    la.wait_for_function("() => window.__daisy.phase === 'picking'", timeout=15000)
+                    pick(la, 'bone'); pick(lb, 'jade')
+                    la.wait_for_function("() => window.__daisy.phase === 'playing'", timeout=15000)
+                    check('…and the two play: glazes and the coin, through the real relay', agree(la, lb))
+                    ca.close(); cb.close(); cc.close()
+                finally:
+                    lounge_relay.terminate()
+            else:
+                print('  (the lounge checks need C:\\thunderbird-cafe\\daisy-relay beside this folder: skipped)')
+
             # The six glazes, faces 1 to 6 (a sheet drawn with die3d.js itself).
             sheet = browser.new_page(viewport={'width': 760, 'height': 520})
             sheet.goto(f'http://127.0.0.1:{srv.server_address[1]}/glazes.html')
@@ -756,7 +900,8 @@ def main():
                 sheet.screenshot(path=os.path.join(SHOTS, 's06-glazes.png'))
             sheet.close()
 
-            noise = [e for e in errors if 'form-src' not in e and 'favicon' not in e and 'TileChanged' not in e]   # the refused tile above is on purpose
+            noise = [e for e in errors if 'form-src' not in e and 'favicon' not in e and 'TileChanged' not in e   # the refused tile above is on purpose
+                     and 'collection=cafe.thunderbird.daisy.lounge' not in e]                          # "no lounge record" is a 400 answer
             check('no errors in the console', not noise, '; '.join(noise[:5]))
             browser.close()
     finally:
