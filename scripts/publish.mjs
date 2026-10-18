@@ -1,13 +1,14 @@
-// Publishes the two Daisy tiles (house and player) and the match record's lexicon from the
-// thunderbird.cafe account. Run once from the daisy-tiles folder (Node 22, no packages needed):
+// Publishes the two Daisy tiles (house and player) and Daisy's lexicons (the match and lounge records,
+// and since step 6 the two permission sets, authPlay and authLounge) from the thunderbird.cafe account. Run once from the daisy-tiles folder (Node 22, no packages needed):
 //
 //   node scripts/publish.mjs              publish whatever isn't published yet
 //   node scripts/publish.mjs --dry-run    show what would be published; ask nothing, write nothing
 //   node scripts/publish.mjs --again      publish the tiles again, as new records (new addresses)
 //
 // It shows what will be published, asks for the account's app password (hidden as you type) and once
-// more before writing. Tiles are always created as new records (never overwriting); the lexicon is put
-// under its own name. What was published is written to published.json, which copy-to-site.mjs reads.
+// more before writing. Tiles are always created as new records (never overwriting); each lexicon is put
+// under its own name, and only when it's new or changed. The Wix TXT record _lexicon.daisy (step 4)
+// covers every cafe.thunderbird.daisy.* lexicon. What was published is written to published.json, which copy-to-site.mjs reads.
 import readline from 'node:readline';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -17,7 +18,20 @@ import { rawCid } from './lib/cid.js';
 import { publishTile, publishLexicon } from './lib/tile-record.js';
 
 export const ACCOUNT = 'did:plc:6vxjigxrqizmbo56gojxico3';     // thunderbird.cafe
+export const LEXICON_IDS = [
+  'cafe.thunderbird.daisy.match',
+  'cafe.thunderbird.daisy.lounge',
+  'cafe.thunderbird.daisy.authPlay',      // permission set: sitting and saving (step 6)
+  'cafe.thunderbird.daisy.authLounge',    // permission set: the lounge (step 6)
+];
 export const LEXICON_FILE = join(ROOT, 'lexicons', 'cafe.thunderbird.daisy.match.json');
+const readLexicons = () => LEXICON_IDS.map((id) => JSON.parse(readFileSync(join(ROOT, 'lexicons', `${id}.json`), 'utf8')));
+// What's published, per lexicon id. Before step 6 published.json held only the match's, as `lexicon`.
+export function publishedLexicons(published) {
+  const map = { ...(published.lexicons || {}) };
+  if (published.lexicon && !map['cafe.thunderbird.daisy.match']) map['cafe.thunderbird.daisy.match'] = published.lexicon;
+  return map;
+}
 export const PUBLISHED_FILE = join(ROOT, 'published.json');
 const GENERATOR = 'Daisy';
 
@@ -45,7 +59,7 @@ export async function tileToPublish(id) {
 export async function runPublish({ fetchImpl = fetch, ask, askHidden, log = console.log, dryRun = false, again = false,
   readPublished = () => (existsSync(PUBLISHED_FILE) ? JSON.parse(readFileSync(PUBLISHED_FILE, 'utf8')) : {}),
   writePublished = (o) => writeFileSync(PUBLISHED_FILE, JSON.stringify(o, null, 2) + '\n'),
-  lexicon = JSON.parse(readFileSync(LEXICON_FILE, 'utf8')), now = () => new Date().toISOString() }) {
+  lexicon = null, lexicons = lexicon ? [lexicon] : readLexicons(), now = () => new Date().toISOString() }) {
   const doc = await getJson(fetchImpl, `https://plc.directory/${ACCOUNT}`);
   const svc = (doc.service || []).find((s) => s.type === 'AtprotoPersonalDataServer' || String(s.id).endsWith('#atproto_pds'));
   if (!svc) throw new Error('Could not find the account\'s server.');
@@ -56,7 +70,9 @@ export async function runPublish({ fetchImpl = fetch, ask, askHidden, log = cons
   const published = readPublished() || {};
   const todo = [];
   for (const id of ['house', 'player']) if (again || !published[id]) todo.push(await tileToPublish(id));
-  const lexiconDue = !published.lexicon || published.lexicon.text !== JSON.stringify(lexicon);
+  const had = publishedLexicons(published);
+  const lexiconsDue = lexicons.filter((l) => !had[l.id] || had[l.id].text !== JSON.stringify(l));
+  const lexiconDue = lexiconsDue.length > 0;
 
   log(`\nAccount: @${handle} (${ACCOUNT}), server ${pds}`);
   if (!todo.length && !lexiconDue) { log('\nEverything is already published (see published.json). Use --again to publish the tiles as new records.'); return { changed: false, published }; }
@@ -65,9 +81,12 @@ export async function runPublish({ fetchImpl = fetch, ask, askHidden, log = cons
     const kb = t.files.reduce((n, f) => n + f.bytes.length, 0) / 1024;
     log(`  - a new tile "${t.name}": ${t.files.length} files, ${kb.toFixed(1)} KB (${t.files.map((f) => f.path).join(' ')})`);
   }
-  if (lexiconDue) log(`  - the lexicon ${lexicon.id} (record type definition), as com.atproto.lexicon.schema/${lexicon.id}`);
+  for (const l of lexiconsDue) {
+    const kind = l.defs && l.defs.main && l.defs.main.type === 'permission-set' ? `permission set "${l.defs.main.title}"` : 'record type definition';
+    log(`  - the lexicon ${l.id} (${kind}), as com.atproto.lexicon.schema/${l.id}${had[l.id] ? ' (changed)' : ''}`);
+  }
   log('All of it is public. Nothing else in the account is touched.');
-  if (dryRun) { log('\nDry run: nothing was written.'); return { changed: false, plan: todo, lexiconDue }; }
+  if (dryRun) { log('\nDry run: nothing was written.'); return { changed: false, plan: todo, lexiconDue, lexiconsDue: lexiconsDue.map((l) => l.id) }; }
 
   const password = await askHidden(`\nApp password for @${handle} (hidden): `);
   if (!password) throw new Error('No app password given; nothing was published.');
@@ -102,17 +121,19 @@ export async function runPublish({ fetchImpl = fetch, ask, askHidden, log = cons
     writePublished(out);                                 // kept after each tile, in case a later step fails
     log(`  done: ${r.uri}`);
   }
-  if (lexiconDue) {
-    log(`\nPublishing the lexicon ${lexicon.id}…`);
-    const r = await publishLexicon({ xrpc, did: ACCOUNT, lexicon });
-    out.lexicon = { uri: r.uri, cid: r.cid, text: JSON.stringify(lexicon) };
+  for (const l of lexiconsDue) {
+    log(`\nPublishing the lexicon ${l.id}…`);
+    const r = await publishLexicon({ xrpc, did: ACCOUNT, lexicon: l });
+    const entry = { uri: r.uri, cid: r.cid, text: JSON.stringify(l) };
+    out.lexicons = { ...publishedLexicons(out), [l.id]: entry };
+    if (l.id === 'cafe.thunderbird.daisy.match') out.lexicon = entry;    // kept where step 4 put it
     writePublished(out);
     log(`  done: ${r.uri}`);
   }
   log('\nAll published, and read back to check. Next:');
-  log('  1. node scripts/copy-to-site.mjs C:\\thunderbird-cafe\\pyxorium.github.io   (points the table at these tiles)');
-  log(`  2. At Wix, add a TXT record: host _lexicon.daisy  value did=${ACCOUNT}`);
-  log('  3. Delete this app password (Bluesky: Settings > Privacy and security > App passwords).');
+  if (todo.length) log('  - node scripts/copy-to-site.mjs C:\\thunderbird-cafe\\pyxorium.github.io   (points the table at these tiles)');
+  log(`  - The Wix TXT record _lexicon.daisy (value did=${ACCOUNT}) must be in place: it is since step 4.`);
+  log('  - Delete this app password (Bluesky: Settings > Privacy and security > App passwords).');
   return { changed: true, published: out };
 }
 

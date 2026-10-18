@@ -42,7 +42,7 @@ address (the table link carries it to the second window). The relay accepts page
 npm test
 ```
 
-There are 73 tests (about 10 seconds). Nothing to install: Node only (the relay test over real
+There are 75 tests (about 10 seconds). Nothing to install: Node only (the relay test over real
 WebSockets needs Node 22 or later and is skipped on older ones).
 
 The browser checks (sandbox, Playwright for Python): `python3 test/check_page.py --site <site folder>
@@ -106,6 +106,14 @@ From the thunderbird.cafe account, once, after the owner's test with the memory 
    published tiles (`src/daisy/published.generated.js`).
 4. At Wix, add a TXT record: host `_lexicon.daisy`, value `did=did:plc:6vxjigxrqizmbo56gojxico3`.
 5. Delete the app password.
+
+**Lexicons (step 6):** `publish.mjs` publishes every lexicon in `LEXICON_IDS`, each only when it's new or
+changed: the match and lounge records, and two **permission sets**, `cafe.thunderbird.daisy.authPlay`
+("Play Daisy": the match records) and `cafe.thunderbird.daisy.authLounge` ("Daisy lounge": the lounge
+record and the relay pass, asked for as
+`include:cafe.thunderbird.daisy.authLounge?aud=did:web:relay.daisy.thunderbird.cafe%23daisy_relay`). Their
+title and detail are what the Authorize screen is meant to show. The one Wix TXT record `_lexicon.daisy`
+covers them all. Sign-in servers cache a set for up to a day, so a changed set may take that long to show.
 
 After a change to a tile: `python3 scripts/make-card-art.py` if the look changed, then
 `node scripts/publish.mjs --again` (new records, new addresses) and step 3 again. Pages running an older
