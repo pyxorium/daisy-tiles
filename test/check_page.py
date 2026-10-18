@@ -331,16 +331,29 @@ def main():
                     os.makedirs(SHOTS, exist_ok=True)
                     page.screenshot(path=os.path.join(SHOTS, name + '.png'), full_page=True)
 
+            def sign_in(page, handle):
+                """The start screen's one sign-in (Oct 18, option B): unless this browser is already signed in as that account."""
+                page.wait_for_function('() => window.__daisy', timeout=10000)
+                page.wait_for_timeout(300)                      # a remembered account is restored first
+                if page.is_visible('.dz-account') and f'@{handle}' in page.inner_text('.dz-account'):
+                    return
+                if page.is_visible('.dz-signout') and not page.is_visible('.dz-lobby'):
+                    page.click('.dz-signout')
+                    page.locator('.dz-lobby:not([hidden])').wait_for(timeout=5000)
+                page.fill('.dz-handle', handle)
+                page.click('.dz-signin')
+                page.wait_for_function(f"() => !document.querySelector('.dz-account').hidden && document.querySelector('.dz-account').textContent.includes('@{handle}')", timeout=10000)
+
             def open_table(page, handle, extra='', url=None):
                 page.goto((url or base) + extra)
-                page.fill('.dz-handle', handle)
+                sign_in(page, handle)
                 page.click('.dz-open')
                 page.locator('.dz-invite:not([hidden])').wait_for(timeout=10000)
                 return page.input_value('.dz-link')
 
             def sit(page, link, handle):
                 page.goto(link)
-                page.fill('.dz-handle', handle)
+                sign_in(page, handle)
                 page.click('.dz-sit')
 
             def pick(page, glaze):
@@ -601,12 +614,15 @@ def main():
             e.goto(base)
             e.wait_for_function('() => window.__fakeAuth && window.__daisy', timeout=10000)
             e.evaluate(f"window.__fakeAuth.signInAs['pyxorium.com'] = {json.dumps(DIDS['colorado.atprotocol.space'])}")
+            check('signed out, the start screen asks to sign in first: Open a table waits, and the lounge says "Sign in above to mingle"',
+                  e.is_visible('.dz-lobby') and e.is_disabled('.dz-open') and 'Sign in above to mingle' in e.inner_text('.dz-lounge-note') and e.is_disabled('.dz-switch'))
+            check('…and says what signing in asks for ("Play Daisy")', 'Play Daisy' in e.inner_text('.dz-lobby-hint'))
             e.fill('.dz-handle', 'pyxorium.com')
-            e.click('.dz-open')
+            e.click('.dz-signin')
             e.wait_for_function("() => document.querySelector('.dz-lobby-note').textContent.includes('different account')", timeout=8000)
-            check('a sign-in for a different account than the typed handle doesn\'t sit', e.locator('.dz-table').is_hidden() and e.locator('.dz-invite').is_hidden())
+            check('a sign-in for a different account than the typed handle isn\'t accepted', e.locator('.dz-account').is_hidden() and e.is_disabled('.dz-open') and e.locator('.dz-table').is_hidden())
             e.evaluate("document.querySelector('.dz-handle').value = 'nothandle'")
-            e.click('.dz-open')
+            e.click('.dz-signin')
             check('a handle that isn\'t one is refused before any window opens', 'Type your handle' in e.inner_text('.dz-lobby-note'))
             e.fill('.dz-handle', '')
             e.click('.dz-handle')
@@ -620,11 +636,17 @@ def main():
             ce, e = computer()
             open_table(e, 'pyxorium.com')
             e.goto(base)
-            e.wait_for_function('() => window.__daisy', timeout=10000)
-            check('the handle box remembers the last account signed in here', e.input_value('.dz-handle') == 'pyxorium.com')
+            e.wait_for_function("() => window.__daisy && !document.querySelector('.dz-account').hidden", timeout=10000)
+            check('the start screen remembers the account signed in here: "Signed in as @pyxorium.com", Open a table ready',
+                  'Signed in as @pyxorium.com' in e.inner_text('.dz-account') and e.is_hidden('.dz-lobby') and e.is_enabled('.dz-open') and e.is_hidden('.dz-home'))
             e.click('.dz-open')
             e.locator('.dz-invite:not([hidden])').wait_for(timeout=10000)
             check('…and carrying on as that account opens no window', e.evaluate('window.__fakeAuth.signIns') == [])
+            e.goto(base)
+            e.wait_for_function("() => window.__daisy && !document.querySelector('.dz-account').hidden", timeout=10000)
+            e.click('.dz-signout')
+            e.locator('.dz-lobby:not([hidden])').wait_for(timeout=5000)
+            check('Sign out on the start screen: back to signing in, Open a table waits again', e.is_hidden('.dz-account') and e.is_disabled('.dz-open'))
             ce.close()
             # A page with another version of the house: the table doesn't start, and both pages say why.
             ce, e = computer()
@@ -802,7 +824,7 @@ def main():
                 try:
                     def mingle(page, handle):
                         page.goto(lurl)
-                        page.fill('.dz-handle', handle)
+                        sign_in(page, handle)
                         page.click('.dz-switch')
                         page.locator('.dz-ldialog:not([hidden])').wait_for(timeout=5000)
                         page.click('.dz-ldialog-yes')
@@ -817,20 +839,22 @@ def main():
                     ca, la = computer(); cb, lb = computer(); cc, lc = computer()
                     la.goto(lurl)
                     la.locator('.dz-lounge').wait_for(timeout=5000)
-                    check('the lounge panel sits under "Open a table", mingling off',
-                          la.is_visible('.dz-lounge') and la.get_attribute('.dz-switch', 'aria-checked') == 'false' and 'Off.' in la.inner_text('.dz-lounge-note'))
-                    la.fill('.dz-handle', 'pyxorium.com')
+                    sign_in(la, 'pyxorium.com')
+                    check('signed in, the lounge panel sits under "Open a table", mingling off, saying the first time asks one more approval',
+                          la.is_visible('.dz-lounge') and la.get_attribute('.dz-switch', 'aria-checked') == 'false' and 'Off.' in la.inner_text('.dz-lounge-note')
+                          and 'one more approval' in la.inner_text('.dz-lounge-note'))
                     la.click('.dz-switch')
                     la.locator('.dz-ldialog:not([hidden])').wait_for(timeout=5000)
                     text = la.inner_text('.dz-ldialog')
-                    check('turning it on shows our explanation first (before any sign-in window)',
+                    check('turning it on shows our explanation first, "one more approval … only this first time" (before any window)',
                           'Turn on mingling?' in text and 'it only says that you\'ve chosen to mingle, not whether you\'re here or signed in' in text
-                          and la.evaluate('window.__fakeAuth.signIns.length') == 0)
+                          and 'one more approval' in text and la.evaluate('window.__fakeAuth.signIns.length') == 1
+                          and la.evaluate('window.__fakeAuth.scopesAsked') == ['atproto include:cafe.thunderbird.daisy.authPlay'])
                     la.click('.dz-ldialog-no')
                     check('…"Not now" closes it and leaves mingling off', la.is_hidden('.dz-ldialog') and la.get_attribute('.dz-switch', 'aria-checked') == 'false')
                     mingle(la, 'pyxorium.com')
                     asked = la.evaluate('window.__fakeAuth.scopesAsked')
-                    check('Continue: one sign-in asking for "Daisy lounge" (with "Play Daisy"), the lounge record written, in the lounge',
+                    check('(signing in had asked for "Play Daisy" only;) Continue asks once more, for "Daisy lounge"; the lounge record written, in the lounge',
                           asked == ['atproto include:cafe.thunderbird.daisy.authPlay include:cafe.thunderbird.daisy.authLounge?aud=did:web:relay.daisy.thunderbird.cafe%23daisy_relay']
                           and PA in LOUNGE and la.get_attribute('.dz-switch', 'aria-checked') == 'true', f'{asked} {LOUNGE}')
                     check('…the relay accepted its pass: "Mingling … (as @pyxorium.com)"', 'as @pyxorium.com' in la.inner_text('.dz-lounge-note'))
