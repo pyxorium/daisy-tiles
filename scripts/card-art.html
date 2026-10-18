@@ -1,0 +1,52 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Daisy card art</title>
+<style>
+  body { margin: 0; background: #ddd; display: flex; flex-direction: column; gap: 20px; padding: 20px; align-items: flex-start;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .card { position: relative; overflow: hidden; background: #fbf7ec; color: #2f2a1f; }
+  .banner { width: 1280px; height: 720px; }
+  .icon { width: 256px; height: 256px; }
+  .card canvas { position: absolute; display: block; }
+  .words { position: absolute; }
+  .words h1 { margin: 0; font-size: 150px; line-height: 1; font-weight: 800; letter-spacing: -0.03em; }
+  .words p { margin: 22px 0 0; font-size: 38px; line-height: 1.3; color: #6f6450; max-width: 13em; }
+  .words .small { font-size: 30px; margin-top: 30px; color: #8a7d64; max-width: 20em; }
+  .petals { position: absolute; border-radius: 50%; }
+</style></head>
+<body>
+<!-- The four card pictures (icon 256 × 256 and banner 1280 × 720 for each tile), drawn with the player
+     tile's own 3D die (player/die3d.js). scripts/make-card-art.py screenshots each card; open this page
+     in a browser to look at them. -->
+<div class="card banner" id="player-banner">
+  <canvas data-glaze="marigold" data-value="4" style="left:90px; top:110px; width:500px; height:500px"></canvas>
+  <div class="words" style="left:640px; top:170px">
+    <h1>Daisy</h1>
+    <p>Roll or bank. A 1 loses the turn. First to 25 wins.</p>
+    <p class="small">A dice race for two players</p>
+  </div>
+</div>
+<div class="card banner" id="house-banner">
+  <!-- mirrored, so the two dice face each other (the daisy is symmetric) -->
+  <canvas data-glaze="jade" data-value="1" style="left:40px; top:150px; width:420px; height:420px; transform: scaleX(-1)"></canvas>
+  <canvas data-glaze="midnight" data-value="4" style="left:820px; top:150px; width:420px; height:420px"></canvas>
+  <div class="words" style="left:0; right:0; top:250px; text-align:center">
+    <h1 style="font-size:96px">Daisy</h1>
+    <p style="margin: 18px auto 0; max-width: 9em; font-size: 36px">the house: the referee on each player's page</p>
+  </div>
+</div>
+<div class="card icon" id="player-icon"><canvas data-glaze="marigold" data-value="1" style="left:-17px; top:-14px; width:290px; height:290px"></canvas></div>
+<div class="card icon" id="house-icon"><canvas data-glaze="jade" data-value="1" style="left:-17px; top:-14px; width:290px; height:290px"></canvas></div>
+<script type="module">
+import { createDie3d } from '../player/die3d.js';
+import { glazeById } from '../player/dice.js';
+const dice = [...document.querySelectorAll('canvas[data-glaze]')].map((c) => {
+  const d = createDie3d(c, { glaze: glazeById(c.dataset.glaze), interactive: () => false });
+  d.show(Number(c.dataset.value), { wilted: false });
+  return c;
+});
+// Ready once every die has drawn and stopped moving.
+const ready = () => dice.every((c) => c.dataset.showing && !c.dataset.moving);
+const wait = () => (ready() ? (window.cardsReady = true) : requestAnimationFrame(wait));
+requestAnimationFrame(wait);
+</script>
+</body></html>

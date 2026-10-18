@@ -1,0 +1,7 @@
+html, body { margin: 0; height: 100%; background: #f6f1e4; }
+/* On its own (a tile gallery, a viewer): no Daisy page set this tile up, so it shows its card picture. */
+#card { position: fixed; inset: 0; z-index: 50; margin: 0; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 10px; padding: 12px; background: #fbf7ec; box-sizing: border-box; }
+#card[hidden] { display: none; }
+#card img { display: block; max-width: 100%; max-height: calc(100% - 4.5em); object-fit: contain; border-radius: 10px; }
+#card figcaption { font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #6f6450; text-align: center; max-width: 30em; }

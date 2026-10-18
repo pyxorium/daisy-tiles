@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' blob: data:; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Daisy</title>
+<link rel="stylesheet" href="./player.css">
+</head>
+<body>
+<figure id="card" hidden>
+  <img id="card-pic" alt="Daisy: a marigold die showing four">
+  <figcaption>Play at thunderbird.cafe/webtiles/daisy/</figcaption>
+</figure>
+<main id="app" data-mode="waiting">
+  <header>
+    <span id="dot" aria-hidden="true"></span>
+    <div class="who">
+      <div id="handle">Daisy</div>
+      <div id="sub">Waiting for a seat</div>
+    </div>
+    <span id="badge" hidden>watching</span>
+  </header>
+
+  <section id="picker" hidden>
+    <h2 id="pick-title">Choose your glaze</h2>
+    <div id="glazes"></div>
+    <p id="pick-note" class="hint" aria-live="polite"></p>
+  </section>
+
+  <section id="stage">
+    <p id="banner" aria-live="polite">Waiting for two players</p>
+    <div class="die-box">
+      <canvas id="die" width="132" height="132" aria-hidden="true"></canvas>
+      <canvas id="die3d" hidden aria-hidden="true" title="Drag to turn the die, scroll or pinch to zoom"></canvas>
+      <div id="burst" aria-hidden="true"></div>
+    </div>
+    <p id="value" aria-live="polite">&nbsp;</p>
+    <p id="turning" class="hint" hidden></p>
+    <p id="turn-line">&nbsp;</p>
+    <div class="actions">
+      <button id="roll" hidden>Roll</button>
+      <button id="bank" hidden class="quiet">Bank</button>
+    </div>
+    <p id="nudge" hidden aria-live="polite"></p>
+  </section>
+
+  <section id="end" hidden>
+    <h2 id="end-title"></h2>
+    <p id="end-note"></p>
+    <div class="end-actions"><button id="save">Save</button><button id="rematch" class="quiet">Rematch</button></div>
+    <p id="save-status" class="hint" aria-live="polite"></p>
+    <p id="rematch-note" class="hint" aria-live="polite"></p>
+  </section>
+
+  <section id="scores" aria-label="Scores">
+    <div class="score" data-seat="1"><span class="name"></span><span class="bar"><span class="fill"></span></span><span class="num">0</span></div>
+    <div class="score" data-seat="2"><span class="name"></span><span class="bar"><span class="fill"></span></span><span class="num">0</span></div>
+    <p class="target">First to <span id="target">25</span> wins</p>
+  </section>
+
+</main>
+<script type="module" src="./player.js"></script>
+</body>
+</html>

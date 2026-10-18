@@ -1,0 +1,19 @@
+{
+  "lexicon": 1,
+  "id": "cafe.thunderbird.daisy.lounge",
+  "description": "Daisy's lounge at thunderbird.cafe/webtiles/daisy/.",
+  "defs": {
+    "main": {
+      "type": "record",
+      "description": "Present while this account mingles in Daisy's lounge (an opt-in, off unless chosen; turning mingling off deletes this record). It says only that the account mingles, never when it's at the table: other mingling players see that only while both are here and one of them asks.",
+      "key": "literal:self",
+      "record": {
+        "type": "object",
+        "required": ["createdAt"],
+        "properties": {
+          "createdAt": { "type": "string", "format": "datetime", "description": "When mingling was turned on." }
+        }
+      }
+    }
+  }
+}
