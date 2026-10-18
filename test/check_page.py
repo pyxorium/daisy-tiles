@@ -488,6 +488,8 @@ def main():
             tile(a, 'mine').locator('#end:not([hidden])').wait_for(timeout=5000)
             title = tile(a, 'mine').locator('#end-title').inner_text()
             check('the end screen names the winner', ('You win' in title) or ('@thunderbirdwine' in title), title)
+            check('a finished match shows "Back to the lounge" under the table, and "Back to the start" by the account line',
+                  a.is_visible('.dz-after-lounge') and a.is_visible('.dz-home'))
             shot(a, 's03-over-a')
 
             # ---------------- step 4: saving ----------------
@@ -883,6 +885,17 @@ def main():
                     pick(la, 'bone'); pick(lb, 'jade')
                     la.wait_for_function("() => window.__daisy.phase === 'playing'", timeout=15000)
                     check('…and the two play: glazes and the coin, through the real relay', agree(la, lb))
+                    # Back to the start during a match: asked first; Stay stays; Leave goes to the start screen and the lounge.
+                    la.click('.dz-home')
+                    check('"Back to the start" mid-match asks first ("Leave this match? … within 2 minutes … forfeit")',
+                          la.is_visible('.dz-leave') and 'within 2 minutes' in la.inner_text('.dz-leave'))
+                    la.click('.dz-leave-no')
+                    check('…Stay keeps the table', la.is_hidden('.dz-leave') and 'table=' in la.url)
+                    la.click('.dz-home')
+                    la.click('.dz-leave-yes')
+                    la.wait_for_function("() => document.getElementById('daisy') && document.getElementById('daisy').dataset.lounge === 'here'", timeout=15000)
+                    check('…Leave: the start screen (no table in the address, the relay and timers kept) and back in the lounge by itself',
+                          'table=' not in la.url and 'relay=' in la.url and la.is_visible('.dz-lounge'), la.url)
                     ca.close(); cb.close(); cc.close()
                 finally:
                     lounge_relay.terminate()
