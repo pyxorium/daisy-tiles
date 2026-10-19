@@ -1,4 +1,5 @@
-"""Browser checks for the site's Daisy page (build steps 2 to 6): two separate pages, as on two
+"""Browser checks for the site's Daisy page (build steps 2 to 7, and the page made public with its blog
+post, Oct 18 2026): two separate pages, as on two
 computers, playing through the stand-in relay; signing in to sit (with a stand-in for the sign-in
 library: real sign-ins can only be tested by the owner), saving, the house version check, and the
 published tiles, pinned (published to a stand-in PDS with the real scripts/publish.mjs).
@@ -230,7 +231,39 @@ def suggestions(route):
     return route.fulfill(status=200, content_type='application/json', body=json.dumps({'actors': actors}))
 
 
+def png_size(path):
+    """Width and height of a PNG, from its header (no picture library needed)."""
+    with open(path, 'rb') as f:
+        head = f.read(24)
+    if head[:8] != b'\x89PNG\r\n\x1a\n':
+        return None
+    return int.from_bytes(head[16:20], 'big'), int.from_bytes(head[20:24], 'big')
+
+
+def public_page_files():
+    """The page went public with its blog post (Oct 18 2026): indexed, in the sitemap, with a link card."""
+    print('The public page (site files):', flush=True)
+    page = open(os.path.join(SITE, 'src', 'pages', 'webtiles', 'daisy', 'index.astro')).read()
+    config = open(os.path.join(SITE, 'astro.config.mjs')).read()
+    hidden = re.search(r'HIDDEN_PAGES\s*=\s*\[([^\]]*)\]', config)
+    check('the page is not hidden: no robots noindex, and not in HIDDEN_PAGES (so it is in the sitemap)',
+          'name="robots"' not in page and hidden is not None and '/webtiles/daisy/' not in hidden.group(1))
+    check('the link card: og:title, og:description, og:url and twitter:card summary_large_image',
+          all(s in page for s in ('property="og:title"', 'property="og:description"', 'property="og:url"', "url: 'https://thunderbird.cafe/webtiles/daisy/'",
+                                  'name="twitter:card" content="summary_large_image"')))
+    check('the card picture: og:image is thunderbird.cafe/webtiles/daisy/card.png, 1280 × 720, with alt text',
+          "image: 'https://thunderbird.cafe/webtiles/daisy/card.png'" in page and 'property="og:image:alt"' in page
+          and 'content="1280"' in page and 'content="720"' in page)
+    card = os.path.join(SITE, 'public', 'webtiles', 'daisy', 'card.png')
+    size = png_size(card) if os.path.exists(card) else None
+    check('public/webtiles/daisy/card.png is there, a 1280 × 720 PNG', size == (1280, 720), str(size))
+    banner = os.path.join(ROOT, 'player', 'banner.png')
+    check('…and it is the player tile\'s own card art (player/banner.png, byte for byte)',
+          os.path.exists(card) and open(card, 'rb').read() == open(banner, 'rb').read())
+
+
 def main():
+    public_page_files()
     out = tempfile.mkdtemp(prefix='daisy-page-')
     # The memory tiles for the main checks: the site's own published.generated.js pins the real published
     # tiles, which only the real PDS serves (the published tiles are checked further down, from a stand-in PDS).
@@ -385,6 +418,19 @@ def main():
                     if not moved:
                         pages[0].wait_for_timeout(150)
                 return False
+
+            # ---------------- the public page (Oct 18 2026) ----------------
+            print('The public page:', flush=True)
+            cp, pp = computer()
+            pp.goto(base)
+            pp.wait_for_function('() => window.__daisy', timeout=10000)
+            how = pp.locator('.dz-lede a.dz-how')
+            check('the intro line links to the blog post: "How this game works →" to /blog/daisy/',
+                  how.count() == 1 and how.inner_text().strip() == 'How this game works →' and how.get_attribute('href') == '/blog/daisy/')
+            foot = pp.inner_text('.dz-foot')
+            check('the footer no longer calls it a testing page', 'testing page' not in foot.lower() and 'build step' not in foot.lower()
+                  and foot.startswith("Each player's page runs its own copy of the house"), foot[:80])
+            cp.close()
 
             # ---------------- a whole match on two "computers" ----------------
             print('Two pages, one table:', flush=True)
