@@ -36,14 +36,20 @@ export const TIMERS = { nudgeMs: 60000, turnMs: 180000, awayMs: 120000, revealMs
 // A short set for testing (owner, Oct 18: option A): offered only by a page on the owner's own computer
 // (?timers=short). Seat 1's house names its set in its first commitment and seat 2's house refuses a
 // table whose set differs from its own, so one page can't speed up the other player's timers.
-export const TIMER_SETS = { real: TIMERS, short: { nudgeMs: 10000, turnMs: 30000, awayMs: 20000, revealMs: 20000 } };
+// Against the bot (step 7, owner Oct 18: option A) there are no timers at all: nobody is waiting, so no
+// nudge and no forfeit; a match left alone simply waits. Both houses on the one page use this set.
+export const TIMER_SETS = {
+  real: TIMERS,
+  short: { nudgeMs: 10000, turnMs: 30000, awayMs: 20000, revealMs: 20000 },
+  bot: { off: true, nudgeMs: 0, turnMs: 0, awayMs: 0, revealMs: 0 },
+};
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const isText = (x, max = 200) => typeof x === 'string' && x.length > 0 && x.length <= max;
 
 export function createTable({ me, target = DEFAULT_TARGET, chainLength = CHAIN_LENGTH, timerSet = 'real', timers = {} }) {
   if (me !== 1 && me !== 2) throw new Error('me must be seat 1 or 2');
-  if (!TIMER_SETS[timerSet]) throw new Error('timerSet must be real or short');
+  if (!TIMER_SETS[timerSet]) throw new Error('timerSet must be real, short or bot');
   if (!TARGETS.includes(target)) throw new Error(`target must be one of ${TARGETS.join(', ')}`);
   if (!Number.isInteger(chainLength) || chainLength < 2) throw new Error('chainLength');
   return {
@@ -436,6 +442,7 @@ function applyForfeit(s, claim, out) {
 // The page's clock tick (every second or so): the nudge, and the forfeits this house may claim.
 function tick(s, ctx, out) {
   const sh = s.shared, L = s.local, me = s.me, other = otherSeat(me), now = ctx.now();
+  if (L.timers.off) return null;                         // against the bot: no timers
   if (['seating', 'picking', 'flipping'].includes(sh.phase)) {
     if (L.awaySince !== null && now - L.awaySince >= L.timers.awayMs) {
       sh.phase = 'abandoned';

@@ -52,7 +52,8 @@ button:focus-visible, .glaze:focus-visible { outline: 3px solid var(--heart); ou
 .score.self .name { color: var(--ink); font-weight: 700; }
 .score.turn .name::before { content: "▸ "; color: var(--heart); }
 .score .bar { height: 10px; background: #efe8d6; border-radius: 999px; overflow: hidden; position: relative; }
-.score .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--sw, var(--accent)); border-radius: 999px; transition: width .4s ease; }
+.score .fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--sw, var(--accent)); border-radius: 999px; transition: width .4s ease;
+  box-shadow: inset 0 0 0 1.5px var(--edge, transparent); }   /* A′: pale glazes get a pip-colour edge */
 .score .fill.pending { opacity: .35; }
 .score .num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
 .target { margin: 2px 0 0; font-size: 12px; color: var(--soft); text-align: right; }
@@ -82,3 +83,7 @@ button:focus-visible, .glaze:focus-visible { outline: 3px solid var(--heart); ou
 #card[hidden] { display: none; }
 #card img { display: block; max-width: 100%; max-height: calc(100% - 4.5em); object-fit: contain; border-radius: 10px; }
 #card figcaption { font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #6f6450; text-align: center; max-width: 30em; }
+
+/* The bot's mark after its handle (step 7). */
+.robot { display: inline-flex; vertical-align: -2px; margin-left: 5px; color: var(--soft); }
+.robot .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

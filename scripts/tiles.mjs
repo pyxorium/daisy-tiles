@@ -13,7 +13,7 @@ export const TILES = {
     name: 'Daisy house',
     description: 'The referee for one seat at a two-computer Daisy dice table: it keeps the rules and its half of the commit-reveal dice. It runs hidden at thunderbird.cafe/webtiles/daisy/, so on its own there is little to see.',
     sizing: { width: 420, height: 200 },
-    files: ['index.html', 'house.css', 'house.js', 'referee.js', 'rules.js', 'dice.js', 'sha256.js', 'tid.js', 'talk.js'],
+    files: ['index.html', 'house.css', 'house.js', 'referee.js', 'rules.js', 'dice.js', 'sha256.js', 'tid.js', 'talk.js', 'bot.js'],
   },
   player: {
     name: 'Daisy',

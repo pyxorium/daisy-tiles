@@ -7,7 +7,12 @@
 // sends the players a view and the page a snapshot of its state, which the page keeps in this browser
 // so a reload can pick up where it left off (the snapshot holds this house's secret seeds: it never
 // leaves this computer).
+//
+// Against the bot (step 7) the person's page runs a second copy of this house for seat 2, set up with
+// `bot: true`: it then plays its own seat (bot.js), at a human pace, and the page passes the two houses'
+// messages to each other instead of through the relay.
 import { createTable, step, viewOf, resumeFrom } from './referee.js';
+import { botMove, bankPoint, BOT_PAUSE_MS, BOT_TURN_START_MS, SHOW_ROLL_MS, SHOW_COIN_MS } from './bot.js';
 import { defaultRandomBytes } from './dice.js';
 import { newTid } from './tid.js';
 import { connect } from './talk.js';
@@ -40,18 +45,55 @@ function onMessage(p) {
   if (p.kind === 'ping') { if (p.from === 'page') talk.send('pong', { to: 'page', n: p.n }); return; }
   if (p.from === 'page' && p.kind === 'setup') return setup(p);
   if (!state) { talk.send('ignored', { to: 'page', why: 'not set up yet', about: p.kind, by: p.from }); return; }
+  if (bot && p.from === 'player') return;                // the bot's seat has no player tile of its own
   const { game, v, to, ...message } = p;
+  run(message, p);
+}
+
+function run(message, p = message) {
   const r = step(state, message, ctx);
   if (r.ignored) talk.send('ignored', { to: 'page', why: r.ignored, about: p.kind, by: p.from });
   state = r.state;
-  for (const o of r.out) talk.send(o.msg.kind, { ...o.msg, to: o.to === 'player' ? 'players' : o.to });
+  for (const o of r.out) {
+    talk.send(o.msg.kind, { ...o.msg, to: o.to === 'player' ? 'players' : o.to });
+    if (bot && o.to === 'player') botHeard(o.msg);
+  }
   afterChange();
+}
+
+// ---------- the bot (step 7) ----------
+// It waits until the screen has caught up (a roll shows its result when the die lands; the coin spins),
+// then a short pause, then moves; each turn it picks a fresh banking point.
+let bot = null;              // { quietUntil, turnAt, timer, bankKey, bankAt }
+function botHeard(m) {
+  const now = Date.now();
+  if (m.kind === 'rolling') bot.quietUntil = Math.max(bot.quietUntil, now + SHOW_ROLL_MS);
+  if (m.kind === 'flip') bot.quietUntil = Math.max(bot.quietUntil, now + SHOW_COIN_MS);
+  if (m.kind === 'turn' && m.seat === state.me) bot.turnAt = now;
+}
+function botNext() {
+  if (!bot || !state) return;
+  clearTimeout(bot.timer);
+  const sh = state.shared;
+  const key = `${sh.matchNo}:${sh.play ? sh.play.turns.length : 0}`;
+  if (bot.bankKey !== key) { bot.bankKey = key; bot.bankAt = bankPoint(); }
+  const move = botMove(viewOf(state), { bankAt: bot.bankAt });
+  if (!move) return;
+  const now = Date.now();
+  const startOfTurn = sh.play && sh.play.turn === state.me && sh.play.turnRolls.length === 0;
+  const due = Math.max(now, bot.quietUntil) + BOT_PAUSE_MS + (startOfTurn ? BOT_TURN_START_MS : 0);
+  bot.timer = setTimeout(() => {
+    const again = botMove(viewOf(state), { bankAt: bot.bankAt });
+    if (again && again.kind === move.kind) run({ ...again, from: 'player' });
+    else botNext();
+  }, due - now);
 }
 
 // The page sets the house up once: which seat it plays for and which timers (the short set only on
 // the owner's computer), or hands back a kept snapshot after a reload.
 function setup(p) {
   setUp = true;
+  if (p.bot === true && !bot) bot = { quietUntil: 0, turnAt: 0, timer: null, bankKey: null, bankAt: null };
   document.getElementById('card').hidden = true;
   delete document.documentElement.dataset.alone;
   if (state) return;
@@ -66,7 +108,7 @@ function setup(p) {
     talk.send('ignored', { to: 'page', why: `kept state refused: ${r.problem || 'another seat'}`, about: 'setup', by: 'page' });
   }
   if (p.seat !== 1 && p.seat !== 2) return;
-  state = createTable({ me: p.seat, timerSet: p.timers === 'short' ? 'short' : 'real' });
+  state = createTable({ me: p.seat, timerSet: ['short', 'bot'].includes(p.timers) ? p.timers : 'real' });
   afterChange();
 }
 
@@ -76,4 +118,5 @@ function afterChange() {
   lastSnapshot = snap;
   talk.send('view', { to: 'players', view: viewOf(state) });
   talk.send('state', { to: 'page', snapshot: state });
+  botNext();
 }

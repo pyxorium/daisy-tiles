@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRouter, GAME, VERSION } from '../page/router.js';
 
 function setup() {
-  const got = { house: [], mine: [], theirs: [], relay: [], page: [], log: [] };
+  const got = { house: [], mine: [], theirs: [], bot: [], relay: [], page: [], log: [] };
   const r = createRouter({
     deliver: (frame, p) => got[frame].push(p),
     toRelay: (d) => got.relay.push(d),
@@ -93,4 +93,26 @@ test('saving: only your own tile can ask the page to save (never the watching co
   r.fromPage('mine', 'save-status', { state: 'saved', handle: 'pyxorium.com' });
   assert.equal(got.mine.at(-1).kind, 'save-status');
   assert.throws(() => r.fromPage('house', 'save-status', {}));
+});
+
+test('against the bot: the two houses talk through the page (no relay); the bot\'s views go nowhere', () => {
+  const { r, got } = setup();
+  // The bot's house → your house, as if from the other house.
+  assert.equal(r.fromTile('bot', m('commit', { to: 'peer', chain: 0, seq: 1, matchNo: 1 })), null);
+  assert.deepEqual(got.house, [m('commit', { chain: 0, seq: 1, matchNo: 1, from: 'peer' })]);
+  assert.equal(got.relay.length, 0);
+  // Your house → the bot's house.
+  assert.equal(r.toBot({ kind: 'pick', glaze: 'jade', seq: 2, matchNo: 1 }), null);
+  assert.deepEqual(got.bot, [m('pick', { glaze: 'jade', seq: 2, matchNo: 1, from: 'peer' })]);
+  assert.equal(r.toBot({ kind: 'view' }), 'not for the other house');
+  // Its snapshot goes to the page; its views to nobody.
+  r.fromTile('bot', m('state', { to: 'page', snapshot: { me: 2 } }));
+  assert.equal(got.page.at(-1).from, 'bot');
+  assert.equal(r.fromTile('bot', m('view', { to: 'players', view: {} })), null);
+  assert.equal(got.mine.length + got.theirs.length, 0);
+  assert.equal(r.fromTile('bot', m('roll', { to: 'page' })), 'house may not send that to the page');
+  // The page sets it up like a house.
+  r.fromPage('bot', 'setup', { seat: 2, bot: true });
+  assert.equal(got.bot.at(-1).kind, 'setup');
+  assert.throws(() => r.fromPage('bot', 'seat', {}));
 });

@@ -4,7 +4,7 @@
 // and draws what the house says. The die is 3D (die3d.js, WebGL) where the browser allows it, else flat.
 import { connect } from './talk.js';
 import { GLAZES, glazeById } from './dice.js';
-import { createDie3d } from './die3d.js';
+import { createDie3d, lightingFor, LAND_MS } from './die3d.js';
 
 const $ = (id) => document.getElementById(id);
 const app = $('app');
@@ -20,6 +20,14 @@ let shown = null;         // { value, n } this seat's die as last drawn
 let die3d = null;         // the 3D die (null: flat)
 let turningTimer = null;
 let saveState = null;     // how saving this match is going (the page's word: saving is the page's job)
+let otherGone = false;    // the page says the other player's page has left the table (step 7)
+// Holding the result until the die lands (step 7, owner Oct 18): once a roll is decided, the house's new
+// view waits here until the die has landed on screen, so the turn line, the scores, the banner and, on a
+// 1, the hand-off to the other seat change together with the die. Both copies time it the same way.
+let held = null;          // a view waiting for the die to land
+let holdUntil = 0, holdTimer = null;
+const rollingAt = new Map();   // roll number → when its tumble started
+let landedN = 0;          // the last roll this copy's die landed on
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export const COIN_MS = 1500, TUMBLE_MS = 650;
@@ -64,13 +72,24 @@ function onMessage(p) {
       render();
       break;
     case 'ping': talk.send('pong', { n: p.n }); break;
-    case 'presence': if (p.who === 'house') { houseGone = p.state === 'gone'; render(); } break;
-    case 'view': view = p.view; render(); break;
+    case 'presence':
+      if (p.who === 'house') { houseGone = p.state === 'gone'; render(); }
+      if (p.who === 'other') { otherGone = p.state === 'gone'; render(); }
+      break;
+    case 'view':
+      if (Date.now() < holdUntil) held = p.view;
+      else { held = null; view = p.view; }
+      render();
+      break;
     // Events from the house (both copies hear them; each keeps to its own seat).
     case 'taken': if (p.seat === seat) { pickNote = `${glazeName(p.glaze)} was taken by the other player at the same moment. Pick another.`; render(); } break;
     case 'flip': coinUntil = Date.now() + (reduceMotion() ? 0 : COIN_MS); spinCoin(p.first); break;
-    case 'rolling': if (p.seat === seat) startTumble(p.n); clearNudge(); break;   // any move restarts the turn timer
-    case 'rolled': if (p.seat === seat) settle(p.value, p.n); break;
+    case 'rolling':
+      rollingAt.set(p.n, Date.now());
+      if (p.seat === seat) startTumble(p.n);
+      clearNudge();                                       // any move restarts the turn timer
+      break;
+    case 'rolled': hold(p.n); if (p.seat === seat) settle(p.value, p.n); break;
     case 'banked': if (p.seat === seat && p.big) burst(); clearNudge(); break;
     case 'nudge': nudge(p); break;
     case 'turn': case 'win': case 'forfeit': case 'match-over': clearNudge(); break;
@@ -78,6 +97,7 @@ function onMessage(p) {
       // A new match: anything still tumbling or landing is over.
       pickNote = ''; shown = null; shown3d = null; saveState = null;
       if (tumble) { clearInterval(tumble.timer); tumble = null; }
+      release(); landedN = 0; rollingAt.clear();
       if (die3d) die3d.clear();
       render();
       break;
@@ -110,6 +130,7 @@ function render() {
   const me = seatInfo(seat), them = seatInfo(other(seat));
   const g = glazeById(me.glaze);
   $('handle').textContent = seat === view.me ? `You (${at(me.handle)})` : at(me.handle);
+  if (me.bot) $('handle').append(robot());
   $('sub').textContent = `Seat ${seat}${g ? ' · ' + g.name : ''}${view.first === seat && view.phase !== 'flipping' ? ' · went first' : ''}`;
   if (die3d && g) die3d.setGlaze(g);
   $('dot').style.background = g ? g.face : '';
@@ -142,7 +163,7 @@ function render() {
   drawScores();
 
   // The die: this seat's last roll (also after a reload, from the view).
-  if (view.rolling && view.rolling.seat === seat && !tumble) startTumble(view.rolling.n);
+  if (view.rolling && view.rolling.seat === seat && !tumble && view.rolling.n > landedN) startTumble(view.rolling.n);
   if (!tumble && !coinSpinning) {
     const last = view.lastRoll && view.lastRoll.seat === seat ? view.lastRoll : null;
     if (last && (!shown || shown.n !== last.n)) shown = { value: last.value, n: last.n };
@@ -152,6 +173,29 @@ function render() {
     $('value').textContent = shown ? (shown.value === 1 ? '1 · the turn is lost' : `Rolled a ${shown.value}`) : ' ';
   }
 }
+// A small outline robot after the bot's handle (the drawing Seven-Up's bot button uses), and words for
+// screen readers.
+const SVG = 'http://www.w3.org/2000/svg';
+function robot() {
+  const span = document.createElement('span');
+  span.className = 'robot';
+  const svg = document.createElementNS(SVG, 'svg');
+  for (const [k, v] of Object.entries({ width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'aria-hidden': 'true', focusable: 'false' })) svg.setAttribute(k, v);
+  const parts = [['line', { x1: 12, y1: 2.5, x2: 12, y2: 5.5 }], ['circle', { cx: 12, cy: 2.3, r: 0.6, fill: 'currentColor' }],
+    ['rect', { x: 4.5, y: 6, width: 15, height: 12, rx: 3.5 }], ['circle', { cx: 9.3, cy: 12, r: 1.3, fill: 'currentColor', stroke: 'none' }],
+    ['circle', { cx: 14.7, cy: 12, r: 1.3, fill: 'currentColor', stroke: 'none' }], ['line', { x1: 2.5, y1: 11, x2: 2.5, y2: 13.5 }],
+    ['line', { x1: 21.5, y1: 11, x2: 21.5, y2: 13.5 }]];
+  for (const [tag, attrs] of parts) {
+    const el = document.createElementNS(SVG, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    svg.append(el);
+  }
+  const sr = document.createElement('span');
+  sr.className = 'sr'; sr.textContent = ' (the bot)';
+  span.append(svg, sr);
+  return span;
+}
+
 // A wilted 1 stays wilted until this seat's next turn starts.
 function myTurnStarted(myTurn) { return myTurn && view.turnRolls.length > 0; }
 
@@ -221,6 +265,9 @@ function drawScores() {
     const fill = row.querySelector('.fill');
     fill.style.width = `${Math.min(100, (100 * (s.score || 0)) / target)}%`;
     fill.style.setProperty('--sw', g ? g.face : '');
+    // A′ (owner, Oct 18): a pale glaze (Bone, Glow, Marigold) gets an edge in its pip colour, so its bar
+    // shows on the cream track. The same lightness measure as the die's lighting.
+    fill.style.setProperty('--edge', g && lightingFor(g).lightness > 0.7 ? g.pip : 'transparent');
     row.querySelector('.num').textContent = pending ? `${s.score || 0}+${pending}` : String(s.score || 0);
   }
 }
@@ -228,12 +275,15 @@ function drawScores() {
 function drawEnd() {
   const v = view, won = v.winner === v.me, loser = other(v.winner);
   $('end-title').textContent = won ? 'You win 🌼' : `${at(seatInfo(v.winner).handle)} wins`;
+  const them = at(seatInfo(other(v.me)).handle);
+  // The other player's page has left (owner, Oct 18): said after the reason, and no Rematch (nobody to agree).
   $('end-note').textContent = v.ending === 'forfeit'
     ? (REASONS[v.forfeitReason] || (() => 'Ended by forfeit.'))(loser === v.me ? 'You' : at(seatInfo(loser).handle)).replace(/^You's/, 'Your')
-    : `First to ${v.target}: ${v.seats.map((s) => s.score).join(' to ')}.`;
-  $('rematch').hidden = !v.canRematch;
-  $('rematch-note').textContent = v.rematch.includes(v.me) ? `Waiting for ${at(seatInfo(other(v.me)).handle)} to agree…`
-    : v.otherAsked ? `${at(seatInfo(other(v.me)).handle)} asks for a rematch.` : '';
+      + (otherGone ? (loser === v.me ? ` ${them} is no longer at the table.` : ' They are no longer at the table.') : '')
+    : `First to ${v.target}: ${v.seats.map((s) => s.score).join(' to ')}.` + (otherGone ? ` ${them} is no longer at the table.` : '');
+  $('rematch').hidden = !v.canRematch || otherGone;
+  $('rematch-note').textContent = otherGone ? '' : v.rematch.includes(v.me) ? `Waiting for ${them} to agree…`
+    : v.otherAsked ? `${them} asks for a rematch.` : '';
   renderSave();
 }
 
@@ -322,7 +372,8 @@ function settle(value, n) {
     setTimeout(() => die3d.land(value, () => {
       if (tumble !== t) return;
       tumble = null; shown = { value, n }; shown3d = { value, n };
-      render();
+      landedN = Math.max(landedN, n);
+      release();
     }), Math.max(0, t.until - Date.now()));
     return;
   }
@@ -333,6 +384,26 @@ function land() {
   clearInterval(t.timer);
   tumble = null;
   shown = { value: t.value, n: t.n };
+  landedN = Math.max(landedN, t.n);
+  release();
+}
+
+// A roll is decided: hold the table as it was until its die lands (the same time on both copies: the
+// tumble runs at least TUMBLE_MS, then the 3D die takes LAND_MS to land; nothing to wait for with
+// reduced motion).
+function hold(n) {
+  if (reduceMotion()) return;
+  const now = Date.now();
+  const lands = Math.max((rollingAt.get(n) || now) + TUMBLE_MS, now) + (die3d ? LAND_MS : 0);
+  if (lands <= now) return;
+  holdUntil = Math.max(holdUntil, lands);
+  clearTimeout(holdTimer);
+  holdTimer = setTimeout(release, holdUntil - now + 20);
+}
+function release() {
+  clearTimeout(holdTimer);
+  holdUntil = 0;
+  if (held) { view = held; held = null; }
   render();
 }
 

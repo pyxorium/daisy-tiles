@@ -14,10 +14,16 @@
 //   mine   → relay → the other page's "theirs" copy: die-view, the shared view of your die (around
 //            the house: it never touches the game or the record; latest wins)
 //   page   → house / player tiles   the page's own messages  (from: "page")
+// Against the bot (step 7) the page holds a fourth tile, "bot": a second copy of the house playing seat 2
+// by itself. There is no relay: the page passes the two houses' messages straight to each other.
+//   bot    → house    to: "peer"    (as from: "peer", like the relay's)
+//   house  → bot      toBot(data), which the page uses in place of the relay
+//   bot    → page     to: "page"    state (kept in this browser), hello, pong, ignored, …
+//   bot    → players  nothing: the bot has no player tile of its own (your house already shows seat 2)
 
 export const GAME = 'daisy';
 export const VERSION = 1;
-export const FRAMES = ['house', 'mine', 'theirs'];
+export const FRAMES = ['house', 'mine', 'theirs', 'bot'];
 
 export const PLAYER_TO_HOUSE = ['pick', 'roll', 'bank', 'rematch'];
 export const TILE_TO_PAGE = ['hello', 'pong'];
@@ -56,6 +62,23 @@ export function createRouter({ deliver, toRelay, onPage = () => {}, onLog = () =
     if (sizeOf(raw) > limits.maxBytes) return drop(frame, raw.kind, 'too big');
     if (!allowed(frame)) return drop(frame, raw.kind, 'too many');
     const kind = raw.kind;
+    if (frame === 'bot') {
+      if (raw.to === 'page') {
+        if (!HOUSE_TO_PAGE.includes(kind)) return drop(frame, kind, 'house may not send that to the page');
+        log({ dir: 'page', from: 'bot', kind });
+        onPage('bot', stamp(raw, 'bot'));
+        return null;
+      }
+      if (raw.to === 'peer') {
+        if (!HOUSE_TO_PEER.includes(kind)) return drop(frame, kind, 'house may not send that to the other house');
+        const { game, v, to, from, ...data } = raw;
+        deliver('house', stamp(data, 'peer'));
+        log({ dir: 'relay', from: 'bot', to: 'house', kind });
+        return null;
+      }
+      if (raw.to === 'players') return null;              // the bot's own view: nobody needs it
+      return drop(frame, kind, 'no such recipient');
+    }
     if (frame === 'house') {
       if (raw.to === 'page') {
         if (!HOUSE_TO_PAGE.includes(kind)) return drop(frame, kind, 'house may not send that to the page');
@@ -112,13 +135,21 @@ export function createRouter({ deliver, toRelay, onPage = () => {}, onLog = () =
     return null;
   }
 
+  // Against the bot: your house's message for the other house goes to the bot's house instead of the relay.
+  function toBot(data) {
+    if (!data || typeof data !== 'object' || !HOUSE_TO_PEER.includes(data.kind)) return drop('house', data && data.kind, 'not for the other house');
+    deliver('bot', stamp(data, 'peer'));
+    log({ dir: 'relay', from: 'house', to: 'bot', kind: data.kind });
+    return null;
+  }
+
   // The page's own messages, checked so a typo can't slip through.
   function fromPage(target, kind, fields = {}) {
-    const ok = target === 'house' ? PAGE_TO_HOUSE.includes(kind) : (target === 'mine' || target === 'theirs') && PAGE_TO_PLAYER.includes(kind);
+    const ok = target === 'house' || target === 'bot' ? PAGE_TO_HOUSE.includes(kind) : (target === 'mine' || target === 'theirs') && PAGE_TO_PLAYER.includes(kind);
     if (!ok) throw new Error(`page may not send ${kind} to ${target}`);
     deliver(target, { ...fields, game: GAME, v: VERSION, kind, from: 'page' });
     log({ dir: 'relay', from: 'page', to: target, kind });
   }
 
-  return { fromTile, fromRelay, fromPage };
+  return { fromTile, fromRelay, fromPage, toBot };
 }

@@ -6,7 +6,15 @@ Both players' pages run the same pinned **house** tile, and the dice are **commi
 player can choose them and anyone can re-check a saved match. Design and status are in
 `claude/daisy-plan.md` (project doc). This folder is modelled on `C:\thunderbird-cafe\sevenup-tiles`.
 
-**Status: build step 6 of 7 (Oct 18 2026): the lounge (step 5, the real relay on Fly.io, is done).** Steps 1 (rules and dice), 2 (two
+**Status: build step 7 of 7 (Oct 19 2026): the bot (steps 5, the real relay on Fly.io, and 6, the lounge, are done).**
+**Play the bot** (step 7) on the start screen: @dicesprite.thunderbird.cafe plays seat 2 from your own page
+in a second copy of the house (`house.js` set up with `bot: true`), the page passing the two houses'
+messages to each other (no relay), with no timers; it chooses its glaze after you, banks at a fresh 8 to
+12 each turn, pauses about 0.8 s after each landing, agrees to a rematch, and a match against it can be
+saved (seat 2 marked `bot`; its dice came from your page, so nobody else can check them). Also in step 7:
+a roll's result (turn line, scores, banner, the hand-off on a 1) waits for the die to land; the end note
+adds "They are no longer at the table." (and drops Rematch) once the other page has left; pale glazes
+(Bone, Glow, Marigold) get a pip-colour edge on their score bar (A′). Steps 1 (rules and dice), 2 (two
 pages through a stand-in relay), 3 (the 3D die) and 4 (signing in to sit, saving, publishing and pinning)
 are done. You sign in with your atproto account to sit (handle suggestions as you type; the permission
 asked is only to save Daisy matches), save a finished match to your own repo when you ask (the page's own
@@ -42,7 +50,7 @@ address (the table link carries it to the second window). The relay accepts page
 npm test
 ```
 
-There are 75 tests (about 10 seconds). Nothing to install: Node only (the relay test over real
+There are 78 tests (about 10 seconds). Nothing to install: Node only (the relay test over real
 WebSockets needs Node 22 or later and is skipped on older ones).
 
 The browser checks (sandbox, Playwright for Python): `python3 test/check_page.py --site <site folder>
@@ -55,7 +63,7 @@ fallback without WebGL, a sheet of the six glazes); step 4: signing in to sit (a
 sign-in library), the handle suggestions, saving (the prompt, the record, Not now, signed out then Sign in
 and save), a sign-in for the wrong account, the house version check, and the published tiles pinned
 (published with the real `publish.mjs` to a stand-in PDS, played under the page's security policy, the
-record naming the house, a changed record refused, each tile on its own showing its card picture and never on the page); step 6, the lounge, against the real relay's server with stand-in lookups (`C:\thunderbird-cafe\daisy-relay\test\lounge-standin.mjs`, needs daisy-relay beside this folder with its packages installed): the explanation before signing in, the "Daisy lounge" sign-in and the lounge record, who else is mingling, blocks both ways, an invitation with Not now and "No answer", a reload while mingling, mingling off deleting the record, and Play sending both pages to one table; "Back to the start" from a table (asked first mid-match) and "Back to the lounge" after it; the start screen's one sign-in (Open a table and the lounge wait for it; mingling asks once more), the lounge card's "Joining the lounge requires one additional authorization", and the start screen's "You have a match in progress with @x. Back to the table". 109 checks. (The main checks use the memory tiles: the site's own pins point at the real published tiles, which only the real PDS serves.) Chromium needs
+record naming the house, a changed record refused, each tile on its own showing its card picture and never on the page); step 6, the lounge, against the real relay's server with stand-in lookups (`C:\thunderbird-cafe\daisy-relay\test\lounge-standin.mjs`, needs daisy-relay beside this folder with its packages installed): the explanation before signing in, the "Daisy lounge" sign-in and the lounge record, who else is mingling, blocks both ways, an invitation with Not now and "No answer", a reload while mingling, mingling off deleting the record, and Play sending both pages to one table; "Back to the start" from a table (asked first mid-match) and "Back to the lounge" after it; the start screen's one sign-in (Open a table and the lounge wait for it; mingling asks once more), the lounge card's "Joining the lounge requires one additional authorization", and the start screen's "You have a match in progress with @x. Back to the table"; step 7: Play the bot (it waits for your glaze, takes another, no timers, a whole match, its banks and its pace, saving with the bot marked, rematch, a reload mid-match, Back to the start without the forfeit question and back again, the link in another browser), the result held until the die lands, the end note once the other page has left, and the pale-glaze edge. 136 checks. (The main checks use the memory tiles: the site's own pins point at the real published tiles, which only the real PDS serves.) Chromium needs
 `--use-angle=swiftshader --enable-unsafe-swiftshader` for WebGL without a GPU (the script passes them).
 
 ## Folders
@@ -66,7 +74,8 @@ record naming the house, a changed record refused, each tile on its own showing 
   - `dice.js`: the six glazes and the hash chain (seed, commitment, reveals, the fair 1 to 6, the coin).
   - `rules.js`: Pig as plain functions (roll, bank, bust, the win at the target, forfeits, replay).
   - `verify.js`: `verifyMatch(record)` re-checks a finished match from its record alone.
-  - `bot.js`: the bot banks at 20 and agrees to a rematch when asked.
+  - `bot.js`: the bot (step 7): picks after the person, banks at a fresh 8 to 12 each turn, agrees to a
+    rematch, and its pace (the house waits for the screen, then about 0.8 s). In the house tile only.
   - `tid.js`: match ids as TIDs (copied from Seven-Up).
 - `house/`: the house tile (hidden, one per page). `referee.js` is the referee for one seat
   (`step(state, message, ctx)`, with the clock and random bytes passed in; `resumeFrom` after a
@@ -81,7 +90,8 @@ record naming the house, a changed record refused, each tile on its own showing 
   **The real relay** (`C:\thunderbird-cafe\daisy-relay`, on Fly.io) runs a byte-for-byte copy: after
   changing `tables.js` here, run `npm run sync` there, test, commit and `fly deploy --ha=false`. (Its own
   tests check the copy matches and that the stand-in and the real relay answer alike.)
-- `page/router.js`: the page's routing between its three tiles and the relay; copied into the site.
+- `page/router.js`: the page's routing between its three tiles and the relay (against the bot, a fourth
+  tile, the bot's house, talks to yours through the page instead); copied into the site.
 - `page/record.js`: the record one player saves (`recordFor`, `checkRecord`, which also runs the
   dice check); copied into the site with the shared files it needs.
 - `lexicons/`: `cafe.thunderbird.daisy.match` (key `tid`, published in step 4) and a draft of

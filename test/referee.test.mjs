@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createTable, step, viewOf, resumeFrom, TIMERS, TIMER_SETS } from '../house/referee.js';
 import { verifyMatch } from '../house/verify.js';
 import { isTid } from '../house/tid.js';
-import { botMove } from '../house/bot.js';
+import { botMove, bankPoint } from '../house/bot.js';
 import { makeSim, randomPlayer, playOut, BOT, ACCOUNTS } from './table-sim.mjs';
 
 const same = (sim) => assert.equal(JSON.stringify(sim.shared(0)), JSON.stringify(sim.shared(1)), 'the two houses disagree');
@@ -295,20 +295,69 @@ test('rematch: same seats and glazes, a new match id, fresh chains, a new coin',
   assert.ok(verifyMatch(sim.result(0)).ok);
 });
 
-test('against the bot: the person\'s page plays both houses; the bot banks at 20 and agrees to a rematch', () => {
+test('against the bot: the person\'s page plays both houses; the bot picks after the person, banks at 8 to 12 and agrees to a rematch', () => {
   const sim = makeSim({ seed: 101, players: [ACCOUNTS[0], BOT] });
+  sim.houses = [createTable({ me: 1, chainLength: 1000, timerSet: 'bot' }), createTable({ me: 2, chainLength: 1000, timerSet: 'bot' })];
   sim.seat();
-  const bot = (v) => botMove(v);
+  sim.flush();
+  assert.equal(botMove(sim.view(1)), null);                          // the person chooses first
+  sim.act(0, { kind: 'pick', glaze: 'jade' });
+  sim.flush();
+  const pick = botMove(sim.view(1), { random: () => 0.99 });
+  assert.equal(pick.kind, 'pick');
+  assert.notEqual(pick.glaze, 'jade');
+  // A fresh banking point each turn (8 to 12), as house.js keeps it.
+  const points = new Map();
+  const bot = (v) => {
+    const key = `${sim.shared(1).matchNo}:${sim.shared(1).play ? sim.shared(1).play.turns.length : 0}`;
+    if (!points.has(key)) points.set(key, bankPoint(sim.rand));
+    return botMove(v, { bankAt: points.get(key), random: sim.rand });
+  };
   playOut(sim, [randomPlayer(sim, { bankAt: 15 }), bot]);
   same(sim);
   const r = sim.result(0);
   assert.equal(r.players[1].bot, true);
+  assert.equal(r.players[1].handle, 'dicesprite.thunderbird.cafe');
   assert.ok(verifyMatch(r).ok);
-  for (const t of r.turns.filter((x) => x.player === 2 && x.end === 'bank')) assert.ok(t.rolls.reduce((a, b) => a + b, 0) >= 20);
+  const banks = r.turns.filter((x) => x.player === 2 && x.end === 'bank').map((t) => t.rolls.reduce((a, b) => a + b, 0));
+  assert.ok(banks.length > 0);
+  for (const t of banks) assert.ok(t >= 8 && t <= 17, String(t));    // banked at 8 to 12, possibly past it
+  for (const p of points.values()) assert.ok(p >= 8 && p <= 12);
   assert.equal(botMove(sim.view(1)), null);                          // it waits to be asked
   sim.act(0, { kind: 'rematch' });
   sim.flush();
   assert.deepEqual(botMove(sim.view(1)), { kind: 'rematch' });
+});
+
+test('bank points: every one of 8 to 12, and nothing else', () => {
+  const seen = new Set();
+  for (let i = 0; i < 100; i++) seen.add(bankPoint(() => i / 100));
+  assert.deepEqual([...seen].sort((a, b) => a - b), [8, 9, 10, 11, 12]);
+  assert.equal(bankPoint(() => 0), 8);
+  assert.equal(bankPoint(() => 0.9999), 12);
+});
+
+test('against the bot there are no timers: no nudge, no forfeit, a match left alone just waits', () => {
+  const sim = makeSim({ seed: 5, players: [ACCOUNTS[0], BOT] });
+  sim.houses = [createTable({ me: 1, chainLength: 1000, timerSet: 'bot' }), createTable({ me: 2, chainLength: 1000, timerSet: 'bot' })];
+  sim.seat();
+  sim.flush();
+  sim.act(0, { kind: 'pick', glaze: 'bone' }); sim.flush();
+  sim.act(1, { kind: 'pick', glaze: 'glow' }); sim.flush();
+  assert.equal(sim.view(0).phase, 'playing');
+  sim.deliver(0, { from: 'page', kind: 'presence', seat: 2, state: 'gone' });
+  for (let i = 0; i < 30; i++) sim.tick(60 * 60 * 1000);                // a day and more
+  sim.flush();
+  assert.equal(sim.view(0).phase, 'playing');
+  assert.equal(sim.view(1).phase, 'playing');
+  assert.ok(!sim.events[0].some((e) => e.kind === 'nudge' || e.kind === 'forfeit'));
+  // A bot table and a two-player table can't be mixed: the timer sets differ.
+  const mixed = makeSim({ seed: 6 });
+  mixed.houses = [createTable({ me: 1, timerSet: 'bot' }), createTable({ me: 2 })];
+  mixed.seat();
+  mixed.flush();
+  assert.ok(mixed.ignored[1].some((x) => x.why === 'different timers'));
+  assert.throws(() => createTable({ me: 1, timerSet: 'fast' }), /real, short or bot/);
 });
 
 test('setup is checked: one account per seat, seats only before play, presence only about the other seat', () => {

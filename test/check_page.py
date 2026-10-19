@@ -425,6 +425,17 @@ def main():
             check('Bank waits for the first roll of the turn', not tile(starter, 'mine').locator('#bank').is_enabled())
             tile(starter, 'mine').locator('#roll').click()
             starter.wait_for_function("() => window.__daisy.snapshot.shared.history.length >= 1", timeout=8000)
+            # Step 7: the result waits for the die to land: just after the houses agree, the turn line and the
+            # scores still show the table as before the roll, on both pages.
+            held_line = tile(starter, 'mine').locator('#turn-line').inner_text()
+            held_score = tile(other_page, 'mine').locator('.score[data-seat="%d"] .num' % first).inner_text()
+            check('while the die tumbles, the turn line and the scores wait for it to land (both pages)',
+                  'Roll to start the turn' in held_line and held_score == '0', f'{held_line!r} {held_score!r}')
+            settled(starter, 'mine')
+            starter.wait_for_timeout(200)
+            v0 = json.loads(shared(starter))['history'][0]['value']
+            line = tile(starter, 'mine').locator('#turn-line').inner_text()
+            check('…and change when it lands', (f'{v0} = {v0} this turn' in line) if v0 != 1 else ('Roll to start' not in line), f'{v0} {line!r}')
             other_page.wait_for_function("() => window.__daisy.snapshot.shared.history.length >= 1", timeout=8000)
             v = json.loads(shared(a))['history'][0]['value']
             seen = ''
@@ -696,7 +707,10 @@ def main():
             r = a.evaluate('window.__daisy.result')
             check('after 20 s away, the match goes to the player still here (short timers)', r['ending'] == 'forfeit' and r['forfeitReason'] == 'away' and r['winner'] == 1, str(r))
             tile(a, 'mine').locator('#end:not([hidden])').wait_for(timeout=5000)
-            check('the end screen says why', 'away too long' in tile(a, 'mine').locator('#end-note').inner_text())
+            note = tile(a, 'mine').locator('#end-note').inner_text()
+            check('the end screen says why, and that they\'ve left: "…was away too long. They are no longer at the table."',
+                  'away too long. They are no longer at the table.' in note, note)
+            check('…with no Rematch (nobody to agree)', tile(a, 'mine').locator('#rematch').is_hidden())
             ca.close()
 
             # The turn timer: the player whose turn it is does nothing.
@@ -716,7 +730,18 @@ def main():
             b.wait_for_function("() => window.__daisy.phase === 'over'", timeout=10000)
             r = a.evaluate('window.__daisy.result')
             check('after 30 s the waiting page claims the turn timeout, and both agree', r['forfeitReason'] == 'turn-timeout' and r['winner'] == (2 if first == 1 else 1) and agree(a, b), str(r))
-            ca.close(); cb.close()
+            waiter = b if idle is a else a
+            tile(waiter, 'mine').locator('#end:not([hidden])').wait_for(timeout=5000)
+            note = tile(waiter, 'mine').locator('#end-note').inner_text()
+            idle_handle = 'pyxorium.com' if idle is a else 'thunderbirdwine.bsky.social'
+            check('the end note while they\'re still on the page: "@x let the turn timer run out." and Rematch stays',
+                  note == f'@{idle_handle} let the turn timer run out.' and tile(waiter, 'mine').locator('#rematch').is_visible(), note)
+            (cb if idle is b else ca).close()
+            tile(waiter, 'mine').locator('#rematch').wait_for(state='hidden', timeout=10000)
+            note = tile(waiter, 'mine').locator('#end-note').inner_text()
+            check('…once they leave: "…They are no longer at the table." and no Rematch',
+                  note == f'@{idle_handle} let the turn timer run out. They are no longer at the table.', note)
+            (ca if idle is b else cb).close()
 
             # Different timers on the two pages: the table doesn't start.
             ca, a = computer()
@@ -830,7 +855,15 @@ def main():
                         page.click('.dz-ldialog-yes')
                         page.wait_for_function("() => document.getElementById('daisy').dataset.lounge === 'here'", timeout=10000)
 
+                    def touch(page):
+                        # The stand-in's lounge forgets a page left untouched for 8 s (the fast timings): a touch
+                        # brings it back, as on the live page.
+                        if page.evaluate("document.getElementById('daisy').dataset.lounge") != 'here':
+                            page.mouse.click(5, 5); page.keyboard.press('Shift')
+                            page.wait_for_function("() => document.getElementById('daisy').dataset.lounge === 'here'", timeout=10000)
+
                     def who(page):
+                        touch(page)
                         page.click('.dz-who-ask')
                         page.wait_for_function("() => !/Looking/.test(document.querySelector('.dz-who-note').textContent)", timeout=5000)
                         page.wait_for_timeout(300)
@@ -895,12 +928,13 @@ def main():
                     check('…and, already approved, the off text drops "requires one additional authorization"',
                           'Off.' in lc.inner_text('.dz-lounge-note') and 'additional authorization' not in lc.inner_text('.dz-lounge-note'), lc.inner_text('.dz-lounge-note'))
                     # Invite again and Play: both pages go to one new table, inviter at seat 1.
+                    touch(lb); touch(la)
                     la.wait_for_function("() => /Invite/.test(document.querySelector('.dz-person').textContent)", timeout=10000)
                     who(la)
                     la.click('.dz-person:has-text("thunderbirdwine") button')
                     lb.locator('.dz-knock:not([hidden])').wait_for(timeout=5000)
                     lb.click('.dz-knock-play')
-                    la.wait_for_function("() => window.__daisy.me && window.__daisy.me.seat === 1", timeout=10000)
+                    la.wait_for_function("() => window.__daisy && window.__daisy.me && window.__daisy.me.seat === 1", timeout=10000)
                     lb.wait_for_function("() => window.__daisy.me && window.__daisy.me.seat === 2", timeout=10000)
                     ta = urllib.parse.parse_qs(urllib.parse.urlparse(la.url).query).get('table')
                     tb = urllib.parse.parse_qs(urllib.parse.urlparse(lb.url).query).get('table')
@@ -930,7 +964,7 @@ def main():
                     q = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
                     check('…its link is that table, with the relay and timers kept', q.get('table') == ta and 'relay' in q, href)
                     la.click('.dz-going a')
-                    la.wait_for_function("() => window.__daisy.me && window.__daisy.me.seat === 1 && window.__daisy.phase === 'playing'", timeout=15000)
+                    la.wait_for_function("() => window.__daisy && window.__daisy.me && window.__daisy.me.seat === 1 && window.__daisy.phase === 'playing'", timeout=15000)
                     check('…Back to the table: at seat 1 again, the match going on', agree(la, lb))
                     lb.click('.dz-home'); lb.click('.dz-leave-yes')
                     lb.wait_for_function("() => document.getElementById('daisy').dataset.lounge === 'here'", timeout=15000)
@@ -941,6 +975,121 @@ def main():
                     lounge_relay.terminate()
             else:
                 print('  (the lounge checks need C:\\thunderbird-cafe\\daisy-relay beside this folder: skipped)')
+
+            # ---------------- step 7: against the bot ----------------
+            print('Against the bot:', flush=True)
+            cx, x = computer()
+            x.goto(base)
+            check('signed out, Play the bot waits for the sign-in too', x.is_disabled('.dz-bot'))
+            sign_in(x, 'pyxorium.com')
+            check('the start screen offers "Play the bot", naming @dicesprite.thunderbird.cafe, with the robot mark',
+                  x.is_enabled('.dz-bot') and '@dicesprite.thunderbird.cafe' in x.inner_text('.dz-bot-text') and x.locator('.dz-bot svg.dz-robot').count() == 1)
+            x.click('.dz-bot')
+            x.wait_for_function("() => window.__daisy && ['house','mine','theirs','bot'].every(r => __daisy.frames.status(r) === 'ready')", timeout=20000)
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(x.url).query)
+            check('Play the bot opens a table of your own (bot=1 in the address), no link to send, no relay',
+                  q.get('table') and q.get('bot') == ['1'] and x.is_hidden('.dz-invite') and x.evaluate('__daisy.vsBot') is True, x.url)
+            x.wait_for_function("() => document.querySelector('.dz-status').textContent.includes('the table\\'s bot')", timeout=10000)
+            check('…"Playing @dicesprite.thunderbird.cafe, the table\'s bot"; you at seat 1', 'Playing @dicesprite.thunderbird.cafe' in x.inner_text('.dz-status') and x.evaluate('__daisy.me.seat') == 1)
+            th = tile(x, 'theirs')
+            th.locator('#handle .robot').wait_for(timeout=8000)
+            check('the bot\'s seat: the same tile, its handle with the robot mark', '@dicesprite.thunderbird.cafe' in th.locator('#handle').inner_text() and th.locator('#handle .robot svg').count() == 1)
+            x.wait_for_timeout(2500)
+            check('the bot waits for you to choose a glaze first', json.loads(shared(x))['glazes'] == [None, None], shared(x))
+            pick(x, 'bone')
+            x.wait_for_function("() => window.__daisy.phase === 'playing'", timeout=15000)
+            sh = json.loads(shared(x))
+            check('…then takes another glaze, and the coin is flipped', sh['glazes'][0] == 'bone' and sh['glazes'][1] not in (None, 'bone') and sh['coin']['first'] in (1, 2), str(sh['glazes']))
+            check('no timers against the bot', x.evaluate('__daisy.snapshot.local.timerSet') == 'bot' and x.evaluate('__daisy.botSnapshot.local.timerSet') == 'bot' and sh['timerSet'] == 'bot')
+            mt = tile(x, 'mine')
+            edge = mt.locator('.score[data-seat="1"] .fill').evaluate("e => e.style.getPropertyValue('--edge')")
+            jade = mt.locator('.score[data-seat="2"] .fill').evaluate("e => e.style.getPropertyValue('--edge')")
+            check('A′: the pale glaze\'s score bar (Bone) gets its pip-colour edge', edge.lower() == '#2b2622', edge)
+            pale = sh['glazes'][1] in ('glow', 'marigold')
+            check('…a darker glaze gets none, a pale one does', (jade != 'transparent') == pale, f"{sh['glazes'][1]} {jade}")
+            shot(x, 's09-bot-playing')
+            # Play it out: you roll to 8 and bank; the bot plays by itself. Watch the bot's pace.
+            changes, last_len, t0 = [], 0, time.time()
+            while time.time() - t0 < 240 and phase(x) != 'over':
+                s = json.loads(shared(x))
+                hist = s['history']
+                if len(hist) != last_len:
+                    for h in hist[last_len:]:
+                        changes.append((time.time(), h['seat'], h['type']))
+                    last_len = len(hist)
+                roll, bank = mt.locator('#roll'), mt.locator('#bank')
+                if roll.is_visible() and roll.is_enabled():
+                    total = sum(s['play']['turnRolls']) if s.get('play') else 0
+                    (bank if total >= 8 and bank.is_enabled() else roll).click(timeout=3000)
+                x.wait_for_timeout(60)
+            res = x.evaluate('window.__daisy.result')
+            check('a whole match against the bot plays out', phase(x) == 'over' and res and res['players'][1]['bot'] is True and res['players'][1]['handle'] == 'dicesprite.thunderbird.cafe', str(res and res['players']))
+            banks = [sum(t['rolls']) for t in res['turns'] if t['player'] == 2 and t['end'] == 'bank']
+            check('the bot banks at 8 to 12 (a turn can run past it, up to 17)', all(8 <= b <= 17 for b in banks), str(banks))
+            gaps = [b[0] - a_[0] for a_, b in zip(changes, changes[1:]) if a_[1] == 2 and b[1] == 2 and a_[2] == 'roll']
+            check('the bot\'s pace: after each roll lands, a pause before its next move (about 2 s between moves)', gaps and min(gaps) >= 1.7, str([round(g, 2) for g in gaps][:12]))
+            # Save it: the record names the bot, and the prompt says plainly what that means.
+            mt.locator('#end:not([hidden])').wait_for(timeout=8000)
+            shot(x, 's10-bot-over')
+            mt.locator('#save').click()
+            x.locator('.dz-dialog:not([hidden])').wait_for(timeout=5000)
+            text = x.inner_text('.dz-dialog-text')
+            check('Save against the bot: the prompt says it names the bot and nobody else can check the dice', "the table's bot" in text and 'nobody else can check the dice' in text, text)
+            x.click('.dz-dialog-yes')
+            x.wait_for_function("() => document.querySelector('.dz-dialog-status').textContent.includes('Saved')", timeout=5000)
+            put = x.evaluate('window.__fakeAuth.saved')[-1]
+            check('…saved to your own account, seat 2 marked as the bot', put['repo'] == DIDS['pyxorium.com'] and put['record']['players'][1].get('bot') is True and put['record']['seat'] == 1, json.dumps(put)[:200])
+            x.click('.dz-dialog-no')
+            # Rematch: the bot agrees at once.
+            mt.locator('#rematch:not([hidden])').click()
+            x.wait_for_function("() => window.__daisy.snapshot.shared.matchNo === 2 && window.__daisy.phase === 'playing'", timeout=20000)
+            check('Rematch: the bot agrees at once, same glazes, a new match', json.loads(shared(x))['glazes'] == sh['glazes'])
+            # A reload mid-match: both houses pick up from this browser.
+            for _ in range(200):
+                if len(json.loads(shared(x))['history']) >= 2:
+                    break
+                roll = mt.locator('#roll')
+                if roll.is_visible() and roll.is_enabled():
+                    roll.click(timeout=3000)
+                x.wait_for_timeout(100)
+            before = json.loads(shared(x))
+            x.reload()
+            x.wait_for_function("() => window.__daisy && ['house','mine','theirs','bot'].every(r => __daisy.frames.status(r) === 'ready')", timeout=20000)
+            x.wait_for_function("() => window.__daisy.snapshot && window.__daisy.snapshot.shared.matchNo === 2", timeout=10000)
+            after = json.loads(shared(x))
+            check('a reload mid-match: back at the table against the bot, the match where it was (no window)',
+                  x.evaluate('__daisy.vsBot') is True and after['matchId'] == before['matchId'] and len(after['history']) >= len(before['history']) and x.evaluate('window.__fakeAuth.signIns.length') == 0)
+            mt = tile(x, 'mine')
+            moved = False
+            for _ in range(150):
+                if len(json.loads(shared(x))['history']) > len(after['history']):
+                    moved = True; break
+                roll = mt.locator('#roll')
+                if roll.is_visible() and roll.is_enabled():
+                    roll.click(timeout=3000)
+                x.wait_for_timeout(100)
+            check('…and play goes on (the bot\'s house kept its secret too)', moved)
+            # Back to the start mid-match: no question (no timers), and the start screen offers the way back.
+            for _ in range(80):
+                if json.loads(shared(x))['pending'] is None and phase(x) == 'playing':
+                    break
+                x.wait_for_timeout(100)
+            x.click('.dz-home')
+            x.wait_for_function("() => !location.search.includes('table=')", timeout=8000)
+            check('Back to the start mid-match against the bot just goes (no forfeit question)', x.is_hidden('.dz-leave'))
+            x.locator('.dz-going:not([hidden])').wait_for(timeout=8000)
+            going = x.inner_text('.dz-going')
+            href = x.get_attribute('.dz-going a', 'href') or ''
+            check('…"You have a match in progress with @dicesprite.thunderbird.cafe. Back to the table"', 'with @dicesprite.thunderbird.cafe.' in going and 'bot=1' in href, going + ' ' + href)
+            x.click('.dz-going a')
+            x.wait_for_function("() => window.__daisy && window.__daisy.vsBot && window.__daisy.snapshot && window.__daisy.snapshot.shared.matchNo === 2 && window.__daisy.phase === 'playing'", timeout=20000)
+            check('…Back to the table: the bot match again, where it was', True)
+            # The link in another browser: the match lives where it started.
+            cy, y = computer()
+            y.goto(x.url)
+            y.wait_for_function("() => !document.querySelector('.dz-status').hidden", timeout=8000)
+            check('a bot match\'s link in another browser says it\'s kept where it started', 'kept in the browser that started it' in y.inner_text('.dz-status') and y.is_hidden('.dz-sit'))
+            cy.close(); cx.close()
 
             # The six glazes, faces 1 to 6 (a sheet drawn with die3d.js itself).
             sheet = browser.new_page(viewport={'width': 760, 'height': 520})
