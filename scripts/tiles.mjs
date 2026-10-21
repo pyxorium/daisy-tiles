@@ -13,13 +13,13 @@ export const TILES = {
     name: 'Daisy house',
     description: 'The referee for one seat at a two-computer Daisy dice table: it keeps the rules and its half of the commit-reveal dice. It runs hidden at thunderbird.cafe/webtiles/daisy/, so on its own there is little to see.',
     sizing: { width: 420, height: 200 },
-    files: ['index.html', 'house.css', 'house.js', 'referee.js', 'rules.js', 'dice.js', 'sha256.js', 'tid.js', 'talk.js', 'bot.js'],
+    files: ['index.html', 'house.css', 'house.js', 'referee.js', 'rules.js', 'dice.js', 'sha256.js', 'tid.js', 'talk.js', 'bot.js', 'coin.js'],
   },
   player: {
     name: 'Daisy',
     description: 'One seat at a two-computer Daisy dice table: one die, roll or bank, a 1 loses the turn, first to 25 wins. Play at thunderbird.cafe/webtiles/daisy/.',
     sizing: { width: 420, height: 560 },
-    files: ['index.html', 'player.css', 'player.js', 'die3d.js', 'dice.js', 'sha256.js', 'talk.js'],
+    files: ['index.html', 'player.css', 'player.js', 'die3d.js', 'coin3d.js', 'coin.js', 'dice.js', 'sha256.js', 'talk.js'],
   },
 };
 // Card pictures, made by scripts/make-card-art.py (only in published tiles; the memory copies don't need them).

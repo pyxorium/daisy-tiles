@@ -35,6 +35,8 @@ h2 { font-size: 16px; margin: 0 0 8px; }
 #die { width: 132px; height: 132px; display: block; }
 #die3d { width: 176px; height: 176px; display: block; touch-action: none; cursor: grab; transition: opacity .2s ease; }
 #app[data-watching="1"] #die3d { cursor: default; }
+/* The coin toss (step 5c): its own canvas over the die's box while the coin is up. */
+#coin3d { position: absolute; inset: 0; width: 176px; height: 176px; display: block; pointer-events: none; }
 #turning { margin: 0; min-height: 0; font-size: 12px; }
 #value { margin: 0; font-size: 18px; font-weight: 700; min-height: 1.4em; }
 #turn-line { margin: 0; color: var(--soft); min-height: 1.4em; }
@@ -47,7 +49,10 @@ button:focus-visible, .glaze:focus-visible { outline: 3px solid var(--heart); ou
 #nudge { margin: 6px 0 0; font-size: 13px; color: #8a4b12; background: #fdecc8; border-radius: 8px; padding: 6px 10px; }
 
 #scores { border-top: 1px solid var(--line); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-.score { display: grid; grid-template-columns: minmax(0, 9em) 1fr 2.2em; gap: 8px; align-items: center; font-size: 13px; }
+.score { display: grid; grid-template-columns: minmax(0, 9em) 16px 1fr 2.2em; gap: 8px; align-items: center; font-size: 13px; }
+/* The keepsake (step 5c): a tiny coin by the first player's score; both rows keep its place so the bars line up. */
+.score .keep { width: 16px; height: 16px; display: block; }
+.score .keep.off { visibility: hidden; }
 .score .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--soft); }
 .score.self .name { color: var(--ink); font-weight: 700; }
 .score.turn .name::before { content: "▸ "; color: var(--heart); }

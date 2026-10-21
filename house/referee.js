@@ -27,6 +27,7 @@ import {
   GLAZES, GLAZE_IDS, CHAIN_LENGTH, newSeed, commitmentOf, revealAt, checkReveal, dieFrom, coinFrom, isLink,
 } from './dice.js';
 import { isTid } from './tid.js';
+import { COIN_TIMINGS, tossSeed } from './coin.js';
 
 export const GAME = 'daisy';
 export const VERSION = 1;
@@ -61,6 +62,7 @@ export function createTable({ me, target = DEFAULT_TARGET, chainLength = CHAIN_L
       seq: 0, sent: [],       // messages sent to the other house (kept for resends)
       peerSeq: 0,             // the last message taken from the other house
       turnSince: null, nudged: false, pendingSince: null, awaySince: null,
+      coinAt: null,           // when this house flipped the coin, by this computer's clock (step 5c: a late tile joins the toss)
     },
   };
 }
@@ -71,7 +73,7 @@ function freshMatch({ matchNo, seats, glazes, chainLength }) {
     matchNo, matchId: null, target: null, timerSet: null, chainLength,
     seats, glazes,
     chains: [],            // [{ fromRoll, commitments: [seat1's | null, seat2's | null] }]
-    coin: null,            // { reveals: [ , ], first }
+    coin: null,            // { reveals: [ , ], first, seed } (seed: the toss's look, from the reveals; step 5c)
     history: [],           // resolved: { type: "roll", seat, n, value, reveals: [ , ] } | { type: "bank", seat }
     pending: null,         // a roll under way: { n, by, reveals: [ , ] }
     play: null,            // the rules' game (rules.js), kept in step with history
@@ -376,11 +378,14 @@ function follow(s, out, ctx) {
     }
     if (sh.phase === 'flipping' && sh.coin.reveals.every(Boolean)) {
       sh.coin.first = coinFrom(sh.matchId, sh.coin.reveals[0], sh.coin.reveals[1]);
+      sh.coin.seed = tossSeed(sh.matchId, sh.coin.reveals[0], sh.coin.reveals[1]);
       sh.play = newGame({ target: sh.target, first: sh.coin.first });
       sh.phase = 'playing';
       s.local.turnSince = ctx.now();
       s.local.nudged = false;
-      toPlayer(out, { kind: 'flip', first: sh.coin.first, matchId: sh.matchId });
+      s.local.coinAt = ctx.now();
+      // The player tiles toss the coin with this seed and these timings, from this moment (step 5c).
+      toPlayer(out, { kind: 'flip', first: sh.coin.first, matchId: sh.matchId, seed: sh.coin.seed, at: s.local.coinAt, timings: { ...COIN_TIMINGS } });
       toPlayer(out, { kind: 'turn', seat: sh.coin.first });
       continue;
     }
@@ -408,6 +413,7 @@ function follow(s, out, ctx) {
       s.shared.phase = 'picking';
       s.local.seeds = [];
       s.local.pendingSince = null;
+      s.local.coinAt = null;
       toPlayer(out, { kind: 'rematch', matchNo: s.shared.matchNo });
       follow(s, out, ctx);
       return;
@@ -512,6 +518,9 @@ export function viewOf(state) {
     glazes: GLAZES.map((g) => ({ ...g, free: !taken(g.id), mine: sh.glazes[me - 1] === g.id })),
     canPick: sh.phase === 'picking' && !sh.glazes[me - 1],
     first: sh.coin ? sh.coin.first : null,
+    // The toss, for a tile that starts or reloads in the middle of it (step 5c, Q77).
+    coin: sh.coin && sh.coin.first ? { first: sh.coin.first, seed: Number.isInteger(sh.coin.seed) ? sh.coin.seed : null,
+      at: Number.isFinite(state.local.coinAt) ? state.local.coinAt : null, timings: { ...COIN_TIMINGS } } : null,
     turn: play ? play.turn : null,
     turnRolls: play ? [...play.turnRolls] : [],
     turnTotal: play ? turnTotal(play) : 0,

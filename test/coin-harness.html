@@ -1,0 +1,77 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Daisy coin harness</title>
+<!-- A small stand-in page for test/check_coin.py (Raku step 5c): your house, your player tile, the copy
+     watching the bot's seat and the bot's house, wired with the game's own router (page/router.js) the
+     way Raku's src/tables/daisy.js and the site's Daisy page do it against the bot. The tiles talk by
+     plain postMessage here (talk.js falls back to it without a tile loader). -->
+<style>
+  body { margin: 0; font: 14px system-ui, sans-serif; background: #eee; }
+  #seats { display: flex; gap: 12px; padding: 12px; }
+  iframe { border: 0; width: 420px; height: 560px; background: #fff; }
+  .hidden { position: absolute; left: -9999px; width: 420px; height: 200px; }
+</style>
+<div id="seats"></div>
+<script type="module">
+import { createRouter } from '../page/router.js';
+const UP = 'tiles-protocol-up-data-payload', DOWN = 'tiles-protocol-down-data-payload';
+const q = new URLSearchParams(location.search);
+const SRC = { house: '../house/index.html', bot: '../house/index.html', mine: '../player/index.html', theirs: '../player/index.html' };
+const frames = {}, hello = { mine: false, theirs: false };
+let houseReady = false, botReady = false, lastView = null;
+const me = { did: 'did:plc:rqbqpaaluty5v47jwciowpik', handle: 'pyxorium.com' };
+const bot = { did: 'did:plc:hd2efebmfhpqcusfya4lguce', handle: 'dicesprite.thunderbird.cafe', bot: true };
+const H = window.__h = { log: [], flips: [], views: [] };
+function make(role) {
+  const f = document.createElement('iframe');
+  f.src = SRC[role]; f.title = role; f.dataset.role = role;
+  if (role === 'house' || role === 'bot') f.className = 'hidden';
+  (role === 'house' || role === 'bot' ? document.body : document.getElementById('seats')).append(f);
+  if (frames[role]) frames[role].remove();
+  frames[role] = f;
+}
+const send = (role, payload) => { const f = frames[role]; if (f && f.contentWindow) f.contentWindow.postMessage({ action: DOWN, payload }, '*'); };
+const router = createRouter({
+  deliver(target, p) {
+    if (p.kind === 'view' && target === 'mine') { lastView = p; H.views.push(p.view); }
+    if (p.kind === 'flip' && target === 'mine') H.flips.push(p);
+    if (target === 'mine' && p.kind !== 'view' && p.kind !== 'ping') (H.events = H.events || []).push({ kind: p.kind, seat: p.seat, t: Date.now() });
+    send(target, p);
+  },
+  toRelay: (data) => (data && data.kind === 'die-view' ? null : router.toBot(data)),
+  onPage(from, p) {
+    if (from === 'bot') { if (p.kind === 'hello') setupBot(); return; }
+    if (p.kind === 'hello') { if (from === 'house') setupHouse(); else { hello[from] = true; introduce(from); } }
+  },
+  onLog: (e) => H.log.push(e),
+});
+addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || d.action !== UP) return;
+  const role = Object.keys(frames).find((r) => frames[r].contentWindow === e.source);
+  if (role) router.fromTile(role, d.payload);
+});
+function introduce(role) {
+  if (role === 'mine') router.fromPage('mine', 'seat', { seat: 1, handle: me.handle, watching: false });
+  else router.fromPage('theirs', 'seat', { seat: 2, handle: bot.handle, watching: true });
+  if (lastView) send(role, lastView);
+  if (houseReady) router.fromPage(role, 'presence', { who: 'house', state: 'back' });
+}
+function setupHouse() {
+  if (houseReady) return; houseReady = true;
+  router.fromPage('house', 'setup', { seat: 1, timers: 'bot' });
+  router.fromPage('house', 'seated', { seat: 1, did: me.did, handle: me.handle });
+  router.fromPage('house', 'seated', { seat: 2, did: bot.did, handle: bot.handle, bot: true });
+  router.fromPage('house', 'reconnected');
+}
+function setupBot() {
+  if (botReady) return; botReady = true;
+  router.fromPage('bot', 'setup', { seat: 2, timers: 'bot', bot: true });
+  router.fromPage('bot', 'seated', { seat: 1, did: me.did, handle: me.handle });
+  router.fromPage('bot', 'seated', { seat: 2, did: bot.did, handle: bot.handle, bot: true });
+  router.fromPage('bot', 'reconnected');
+}
+H.reload = (role) => { hello[role] = false; make(role); };
+H.frame = (role) => frames[role];
+for (const r of ['house', 'mine', 'theirs', 'bot']) make(r);
+</script>

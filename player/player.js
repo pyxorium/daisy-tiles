@@ -5,6 +5,8 @@
 import { connect } from './talk.js';
 import { GLAZES, glazeById } from './dice.js';
 import { createDie3d, lightingFor, LAND_MS } from './die3d.js';
+import { tossMotion, createCoinView, drawFlatCoin, drawKeepsake } from './coin3d.js';
+import { COIN_LOOK, coinPlan } from './coin.js';
 
 const $ = (id) => document.getElementById(id);
 const app = $('app');
@@ -14,7 +16,8 @@ let view = null;          // the house's latest view (from this page's house, wh
 let houseGone = false;    // the page says the house stopped: wait
 let pickNote = '';
 let nudgeUntil = 0, nudgeTimer = null;
-let coinUntil = 0;        // Roll waits while the coin spins (the house has already decided)
+let coinUntil = 0;        // Roll waits until the coin toss ends (the house has already decided; step 5c: one clock)
+let toss = null;          // the coin toss on screen: { key, first, at, plan, motion, canvas, view3d, raf, timer }
 let tumble = null;        // { n, until, timer, value }
 let shown = null;         // { value, n } this seat's die as last drawn
 let die3d = null;         // the 3D die (null: flat)
@@ -30,7 +33,7 @@ const rollingAt = new Map();   // roll number → when its tumble started
 let landedN = 0;          // the last roll this copy's die landed on
 const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-export const COIN_MS = 1500, TUMBLE_MS = 650;
+export const TUMBLE_MS = 650;
 const REASONS = {
   'turn-timeout': (who) => `${who} let the turn timer run out.`,
   away: (who) => `${who} was away too long.`,
@@ -83,7 +86,7 @@ function onMessage(p) {
       break;
     // Events from the house (both copies hear them; each keeps to its own seat).
     case 'taken': if (p.seat === seat) { pickNote = `${glazeName(p.glaze)} was taken by the other player at the same moment. Pick another.`; render(); } break;
-    case 'flip': coinUntil = Date.now() + (reduceMotion() ? 0 : COIN_MS); spinCoin(p.first); break;
+    case 'flip': startToss(p); break;
     case 'rolling':
       rollingAt.set(p.n, Date.now());
       if (p.seat === seat) startTumble(p.n);
@@ -96,6 +99,7 @@ function onMessage(p) {
     case 'rematch':
       // A new match: anything still tumbling or landing is over.
       pickNote = ''; shown = null; shown3d = null; saveState = null;
+      stopToss(); coinUntil = 0;
       if (tumble) { clearInterval(tumble.timer); tumble = null; }
       release(); landedN = 0; rollingAt.clear();
       if (die3d) die3d.clear();
@@ -131,7 +135,8 @@ function render() {
   const g = glazeById(me.glaze);
   $('handle').textContent = seat === view.me ? `You (${at(me.handle)})` : at(me.handle);
   if (me.bot) $('handle').append(robot());
-  $('sub').textContent = `Seat ${seat}${g ? ' · ' + g.name : ''}${view.first === seat && view.phase !== 'flipping' ? ' · went first' : ''}`;
+  // Who went first is the keepsake's job now (step 5c, Q79): the tiny coin by the first player's score.
+  $('sub').textContent = `Seat ${seat}${g ? ' · ' + g.name : ''}`;
   if (die3d && g) die3d.setGlaze(g);
   $('dot').style.background = g ? g.face : '';
   $('dot').style.borderColor = g ? g.pip : '';
@@ -147,6 +152,9 @@ function render() {
     $('stage').hidden = !watching;
     if (!watching) drawEnd();
   }
+
+  // A tile that starts or reloads during the toss joins it where it is (Q77).
+  if (view.coin && ['playing', 'over'].includes(view.phase)) startToss({ ...view.coin, matchId: view.matchId });
 
   const playing = view.phase === 'playing' && !houseGone;
   const myTurn = playing && view.turn === seat;
@@ -164,7 +172,7 @@ function render() {
 
   // The die: this seat's last roll (also after a reload, from the view).
   if (view.rolling && view.rolling.seat === seat && !tumble && view.rolling.n > landedN) startTumble(view.rolling.n);
-  if (!tumble && !coinSpinning) {
+  if (!tumble && !tossing()) {
     const last = view.lastRoll && view.lastRoll.seat === seat ? view.lastRoll : null;
     if (last && (!shown || shown.n !== last.n)) shown = { value: last.value, n: last.n };
     if (view.phase === 'picking' || view.phase === 'seating') shown = null;
@@ -268,6 +276,7 @@ function drawScores() {
     // A′ (owner, Oct 18): a pale glaze (Bone, Glow, Marigold) gets an edge in its pip colour, so its bar
     // shows on the cream track. The same lightness measure as the die's lighting.
     fill.style.setProperty('--edge', g && lightingFor(g).lightness > 0.7 ? g.pip : 'transparent');
+    drawKeep(row, n, s, g);
     row.querySelector('.num').textContent = pending ? `${s.score || 0}+${pending}` : String(s.score || 0);
   }
 }
@@ -307,7 +316,6 @@ function renderSave() {
 // ---------- the die (flat in step 2) ----------
 const PIPS = { 1: [[1, 1]], 2: [[0, 0], [2, 2]], 3: [[0, 0], [1, 1], [2, 2]], 4: [[0, 0], [2, 0], [0, 2], [2, 2]],
   5: [[0, 0], [2, 0], [1, 1], [0, 2], [2, 2]], 6: [[0, 0], [2, 0], [0, 1], [2, 1], [0, 2], [2, 2]] };
-let coinSpinning = false;
 
 function canvas() {
   const c = $('die'), dpr = window.devicePixelRatio || 1, S = 132;
@@ -407,27 +415,95 @@ function release() {
   render();
 }
 
-// The coin: who goes first. It spins on both copies, then Roll is free.
-function spinCoin(first) {
-  if (reduceMotion()) { render(); return; }
-  coinSpinning = true;
-  useFlat(true);
-  const start = Date.now();
-  const timer = setInterval(() => {
-    const t = (Date.now() - start) / COIN_MS;
-    const g = canvas();
-    if (t >= 1) {
-      clearInterval(timer); coinSpinning = false;
-      useFlat(!die3d);
-      render(); return;
-    }
-    const w = Math.abs(Math.cos(t * Math.PI * 6)) * 46 + 2;
-    g.fillStyle = '#f2b233'; g.strokeStyle = '#3b2a10'; g.lineWidth = 2;
-    g.beginPath(); g.ellipse(66, 66, w, 46, 0, 0, Math.PI * 2); g.fill(); g.stroke();
-    if (t > 0.7) { g.fillStyle = '#3b2a10'; g.font = '700 30px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(String(first), 66, 67); }
-    $('value').textContent = t > 0.7 ? `${nameOf(first)} ${first === (view && view.me) ? 'go' : 'goes'} first` : ' ';
-  }, 40);
+// ---------- the coin toss (step 5c) ----------
+// The house decides who goes first and sends the toss's seed, the moment it flipped and the timings; both
+// copies on this page (and the other computer's) toss the same coin from that moment, then Roll is free
+// for everyone at the same time (Q63). The coin has its own canvas over the die's box (coin3d.js); without
+// WebGL a flat coin turns on the flat die's canvas; with reduced motion the coin lies still on the
+// winner's face for the same time (Q78).
+const tossing = () => !!toss && !toss.done;
+function startToss(c) {
+  if (!c || (c.first !== 1 && c.first !== 2)) return;
+  const key = `${c.matchId || ''}:${c.seed}`;
+  if (toss && toss.key === key) return;
+  stopToss();
+  const plan = coinPlan(c.timings);
+  const at = Number.isFinite(c.at) ? c.at : Date.now();
+  const end = at + plan.total;
+  coinUntil = end;
+  toss = { key, first: c.first, at, plan, done: false, raf: 0, timer: null, canvas: null, view3d: null, flat: false };
+  if (Date.now() >= end) { toss.done = true; render(); return; }          // long over: only the keepsake
+  toss.motion = tossMotion({ first: c.first, seed: Number.isInteger(c.seed) ? c.seed : 0, timings: plan.timings });
+  toss.timer = setTimeout(endToss, end - Date.now() + 20);
+  const boxEl = $('die').parentElement;
+  const cv = document.createElement('canvas');
+  cv.id = 'coin3d'; cv.setAttribute('aria-hidden', 'true');
+  boxEl.append(cv);
+  toss.canvas = cv;
+  toss.view3d = createCoinView(cv);
+  toss.flat = !toss.view3d;
+  if (toss.flat) cv.remove();
+  $('die3d').hidden = true;
+  $('die').hidden = !toss.flat;
+  document.documentElement.dataset.coin = toss.flat ? 'flat' : 'webgl';
+  const frame = () => {
+    if (!toss || toss.done) return;
+    drawToss();
+    toss.raf = requestAnimationFrame(frame);
+  };
+  drawToss();
+  toss.raf = requestAnimationFrame(frame);
   render();
+}
+function tossState(t) {
+  if (reduceMotion()) return { x: 0, y: 0, h: 0, q: toss.motion.finalQ, scale: 1, alpha: 1, visible: t < toss.plan.total, landed: true, still: true, phase: 'rest' };
+  return toss.motion.sample(t);
+}
+function coinGlazes() {
+  const face = (n) => (glazeById(seatInfo(n).glaze) || GLAZES[n === 1 ? 0 : 5]).face;
+  return [face(1), face(2)];
+}
+function drawToss() {
+  const t = Date.now() - toss.at;
+  const st = tossState(t);
+  if (toss.flat) {
+    const c = $('die'), dpr = window.devicePixelRatio || 1, S = 132;
+    if (c.width !== S * dpr) { c.width = S * dpr; c.height = S * dpr; }
+    const g = c.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawFlatCoin(g, st, coinGlazes(), COIN_LOOK, S);
+  } else toss.view3d.draw(st, coinGlazes());
+  const words = reduceMotion() || t >= toss.plan.landsAt;
+  $('value').textContent = words ? `${nameOf(toss.first)} ${toss.first === (view && view.me) ? 'go' : 'goes'} first` : ' ';
+  document.documentElement.dataset.coinPhase = st.phase;
+}
+function endToss() {
+  if (!toss || toss.done) return;
+  toss.done = true;
+  cancelAnimationFrame(toss.raf);
+  if (toss.view3d) toss.view3d.lose();
+  if (toss.canvas) toss.canvas.remove();
+  delete document.documentElement.dataset.coinPhase;
+  useFlat(!die3d);
+  render();
+}
+function stopToss() {
+  if (!toss) return;
+  clearTimeout(toss.timer);
+  endToss();
+  toss = null;
+}
+// The keepsake (Q67): a tiny coin in the first player's glaze by their score, once the toss is over.
+// It says who went first (Q79): its tooltip and its name for screen readers.
+function drawKeep(row, n, s, g) {
+  const c = row.querySelector('.keep');
+  if (!c) return;
+  const on = !!view && view.first === n && ['playing', 'over'].includes(view.phase) && !tossing() && !!g;
+  c.classList.toggle('off', !on);
+  if (!on) { c.removeAttribute('title'); c.removeAttribute('aria-label'); c.dataset.drawn = ''; return; }
+  const label = `${n === view.me ? 'You' : at(s.handle)} went first`;
+  c.title = label; c.setAttribute('aria-label', label);
+  if (c.dataset.drawn !== g.id) { drawKeepsake(c, g.face, COIN_LOOK); c.dataset.drawn = g.id; }
 }
 
 // 🌼 for a big bank, on both screens.

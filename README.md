@@ -50,7 +50,7 @@ address (the table link carries it to the second window). The relay accepts page
 npm test
 ```
 
-There are 78 tests (about 10 seconds). Nothing to install: Node only (the relay test over real
+There are 86 tests (about 12 seconds). Nothing to install: Node only (the relay test over real
 WebSockets needs Node 22 or later and is skipped on older ones).
 
 The browser checks (sandbox, Playwright for Python): `python3 test/check_page.py --site <site folder>
@@ -65,6 +65,25 @@ and save), a sign-in for the wrong account, the house version check, and the pub
 (published with the real `publish.mjs` to a stand-in PDS, played under the page's security policy, the
 record naming the house, a changed record refused, each tile on its own showing its card picture and never on the page); step 6, the lounge, against the real relay's server with stand-in lookups (`C:\thunderbird-cafe\daisy-relay\test\lounge-standin.mjs`, needs daisy-relay beside this folder with its packages installed): the explanation before signing in, the "Daisy lounge" sign-in and the lounge record, who else is mingling, blocks both ways, an invitation with Not now and "No answer", a reload while mingling, mingling off deleting the record, and Play sending both pages to one table; "Back to the start" from a table (asked first mid-match) and "Back to the lounge" after it; the start screen's one sign-in (Open a table and the lounge wait for it; mingling asks once more), the lounge card's "Joining the lounge requires one additional authorization", and the start screen's "You have a match in progress with @x. Back to the table"; step 7: Play the bot (it waits for your glaze, takes another, no timers, a whole match, its banks and its pace, saving with the bot marked, rematch, a reload mid-match, Back to the start without the forfeit question and back again, the link in another browser), the result held until the die lands, the end note once the other page has left, and the pale-glaze edge. 136 checks. (The main checks use the memory tiles: the site's own pins point at the real published tiles, which only the real PDS serves.) Chromium needs
 `--use-angle=swiftshader --enable-unsafe-swiftshader` for WebGL without a GPU (the script passes them).
+
+**The coin toss (Raku step 5c, Oct 21 2026):** `python3 test/check_coin.py [--shots DIR]` serves this
+folder and plays against the bot in `test/coin-harness.html` (your house, your tile, the watching copy and
+the bot's house, wired with `page/router.js`; nothing else needed): the toss on both copies, Roll locked
+until the sequence ends, the words at the landing, the keepsake by the first player's score and no
+"went first", the bot's first roll 1.2 s after Roll is free, a tile reloaded mid-toss joining it, reduced
+motion (a still coin for the same time), no WebGL (the flat coin), no errors. 32 checks.
+
+## The coin toss (step 5c)
+
+The coin is decided as before (`coinFrom`, both reveals). With it, each house works out the toss's seed
+from the same values (`shared/coin.js` `tossSeed`) and tells its player tiles `flip` with `seed`, `at`
+(when it flipped, by this computer's clock) and `timings`; the view carries the same as `coin`, so a tile
+that starts or reloads mid-toss joins it. `player/coin3d.js` draws the coin (plain WebGL like the die, on
+its own canvas over the die's box, released after the toss; a flat coin without WebGL; still with reduced
+motion) and the keepsake. The look and the timings are the owner's, from the tuning panel
+(`claude/raku-stage5c-plan.md`), in `shared/coin.js`: about 5.2 s from the flip to Roll being free, for
+everyone; the bot moves 1.2 s after that. The guard lowers a toss only if its drift and wobble would take
+the coin's edge out of the box (it never does with the owner's numbers).
 
 ## Folders
 
@@ -101,7 +120,8 @@ record naming the house, a changed record refused, each tile on its own showing 
   from Seven-Up), `make-card-art.py` and `card-art.html` (the card pictures, drawn with the real die).
 - `published.json`: written by `publish.mjs` (what was published, and pinned). Keep it.
 - `test/`: `table-sim.mjs` (two houses joined by a stand-in relay, with a seeded random generator),
-  the Node test files, `check_page.py` and `loader-replica.mjs` (a copy of Seven-Up's).
+  the Node test files, `check_page.py` and `loader-replica.mjs` (a copy of Seven-Up's), `check_coin.py`
+  and `coin-harness.html` (the coin toss, step 5c).
 
 ## Publishing (step 4)
 
@@ -165,6 +185,7 @@ your player tile to the other page's watching copy; latest wins, never recorded)
 
 From the page: `setup` (the seat, the timer set, a kept snapshot), `seated`, `presence` (`gone`/`back`,
 about the other seat), `tick`, `reconnected` (ask the other house for anything missed). From this
-seat's player: `pick`, `roll`, `bank`, `rematch`. To the player: `picking`, `taken`, `flipping`, `flip`,
+seat's player: `pick`, `roll`, `bank`, `rematch`. To the player: `picking`, `taken`, `flipping`, `flip`
+(`first`, `matchId`, and since step 5c `seed`, `at`, `timings`),
 `turn`, `rolling`, `rolled`, `bust`, `banked` (`big` for the 🌼 burst), `win`, `nudge`, `forfeit`,
 `match-over`, `rematch-asked`, `rematch`, `abandoned`. To the page: `result`.

@@ -10,7 +10,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const SHARED = readdirSync(join(root, 'shared')).filter((f) => f.endsWith('.js'));
 export const SHARED_FOR = {
   house: SHARED,
-  player: ['talk.js', 'dice.js', 'sha256.js'],
+  player: ['talk.js', 'dice.js', 'sha256.js', 'coin.js'],
 };
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   for (const [tile, files] of Object.entries(SHARED_FOR)) {

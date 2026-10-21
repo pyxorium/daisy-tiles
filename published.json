@@ -2,16 +2,16 @@
   "account": "did:plc:6vxjigxrqizmbo56gojxico3",
   "handle": "thunderbird.cafe",
   "house": {
-    "uri": "at://did:plc:6vxjigxrqizmbo56gojxico3/ing.dasl.masl/3my6ucagtd32m",
-    "cid": "bafyreib473vajcpexj5m7xcpah4dtwyzfazknnuqss4mokiclqcvgvye54",
-    "manifestCid": "bafyreieg2gpsq5klgjwfu3egowyu65olgd53yncrh5i2imorfrfxqqs3oa",
-    "publishedAt": "2026-10-19T00:26:24.730Z"
+    "uri": "at://did:plc:6vxjigxrqizmbo56gojxico3/ing.dasl.masl/3myfnyphiuw2t",
+    "cid": "bafyreidwwralslcgks5hwet7adtcthwti74k7vo47bcuipbwcqmspqk5zu",
+    "manifestCid": "bafyreiaea2y4lvz3uipnpeejytm4izsfcdve2a4lk77h363qu7i46r2nwa",
+    "publishedAt": "2026-10-21T17:22:20.026Z"
   },
   "player": {
-    "uri": "at://did:plc:6vxjigxrqizmbo56gojxico3/ing.dasl.masl/3my6uchoghd2m",
-    "cid": "bafyreihsiqt4owq4p2bfudfwvz5qbxub3bw3q63b3ufnuepfa35p6yui7m",
-    "manifestCid": "bafyreianld3iew22p4yopjksxninhkyg4w4lgmpe6lqlgn3ghvt7kcwljq",
-    "publishedAt": "2026-10-19T00:26:32.405Z"
+    "uri": "at://did:plc:6vxjigxrqizmbo56gojxico3/ing.dasl.masl/3myfnywxt6v2r",
+    "cid": "bafyreif3zbe7lxc2wbiszai4c3yk7ltzxzaszwnsdqtxl6rtx5kiwwn2be",
+    "manifestCid": "bafyreid6anijjjenrwzvom2ahv6lpgsuvqaeohnzdgy5riy7367dvmgihq",
+    "publishedAt": "2026-10-21T17:22:27.913Z"
   },
   "lexicon": {
     "uri": "at://did:plc:6vxjigxrqizmbo56gojxico3/com.atproto.lexicon.schema/cafe.thunderbird.daisy.match",

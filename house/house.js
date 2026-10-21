@@ -13,6 +13,7 @@
 // messages to each other instead of through the relay.
 import { createTable, step, viewOf, resumeFrom } from './referee.js';
 import { botMove, bankPoint, BOT_PAUSE_MS, BOT_TURN_START_MS, SHOW_ROLL_MS, SHOW_COIN_MS } from './bot.js';
+import { coinPlan } from './coin.js';
 import { defaultRandomBytes } from './dice.js';
 import { newTid } from './tid.js';
 import { connect } from './talk.js';
@@ -62,13 +63,14 @@ function run(message, p = message) {
 }
 
 // ---------- the bot (step 7) ----------
-// It waits until the screen has caught up (a roll shows its result when the die lands; the coin spins),
+// It waits until the screen has caught up (a roll shows its result when the die lands; the coin is tossed),
 // then a short pause, then moves; each turn it picks a fresh banking point.
 let bot = null;              // { quietUntil, turnAt, timer, bankKey, bankAt }
 function botHeard(m) {
   const now = Date.now();
   if (m.kind === 'rolling') bot.quietUntil = Math.max(bot.quietUntil, now + SHOW_ROLL_MS);
-  if (m.kind === 'flip') bot.quietUntil = Math.max(bot.quietUntil, now + SHOW_COIN_MS);
+  // The coin toss runs from the flip's own time for the plan's length (step 5c), as on the screens.
+  if (m.kind === 'flip') bot.quietUntil = Math.max(bot.quietUntil, (Number.isFinite(m.at) ? m.at : now) + (m.timings ? coinPlan(m.timings).total : SHOW_COIN_MS));
   if (m.kind === 'turn' && m.seat === state.me) bot.turnAt = now;
 }
 function botNext() {

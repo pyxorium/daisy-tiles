@@ -10,8 +10,11 @@ export const BOT_BANK_FROM = 8, BOT_BANK_TO = 12;
 
 // Its pace (owner, Oct 18): a short, human pause after each landing before it rolls again or banks, and a
 // moment more at the start of its turn. The player tiles show a roll's result when the die lands, about
-// SHOW_ROLL_MS after it starts (player.js: TUMBLE_MS 650 + LAND_MS 650), and the coin spins COIN_MS.
-export const BOT_PAUSE_MS = 800, BOT_TURN_START_MS = 400, SHOW_ROLL_MS = 1300, SHOW_COIN_MS = 1500;
+// SHOW_ROLL_MS after it starts (player.js: TUMBLE_MS 650 + LAND_MS 650). The coin toss (step 5c) takes
+// the plan's whole length (coin.js coinPlan, about 5.2 s); house.js waits for it from the flip's own time,
+// so the bot's first roll comes 1.2 s after Roll is free (pause + turn start: the owner's tuned pause).
+import { COIN_TOTAL_MS } from './coin.js';
+export const BOT_PAUSE_MS = 800, BOT_TURN_START_MS = 400, SHOW_ROLL_MS = 1300, SHOW_COIN_MS = COIN_TOTAL_MS;
 
 // A banking point for one turn (random() as Math.random: 0 to under 1).
 export const bankPoint = (random = Math.random) => BOT_BANK_FROM + Math.floor(random() * (BOT_BANK_TO - BOT_BANK_FROM + 1));
